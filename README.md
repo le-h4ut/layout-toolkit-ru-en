@@ -21,6 +21,20 @@ Powered by **AutoHotkey v2**.
 
 ---
 
+## Super Quick Install and Start / Очень Быстрая Установка и Запуск
+
+Open PowerShell and paste this command:
+
+```powershell
+$r=Invoke-RestMethod 'https://api.github.com/repos/le-h4ut/layout-toolkit-ru-en/releases/latest'; $a=$r.assets | Where-Object name -like '*Windows.zip' | Select-Object -First 1; $d="$env:USERPROFILE\Layout-Toolkit"; Invoke-WebRequest $a.browser_download_url -OutFile "$env:TEMP\LayoutToolkit.zip"; Expand-Archive "$env:TEMP\LayoutToolkit.zip" $d -Force; & "$d\Run_Layout_Toolkit.cmd"
+```
+
+The command automatically downloads the latest Windows release, extracts it to `~/Layout-Toolkit`, and starts Layout Toolkit.
+
+> **Note:** This is a temporary solution. A dedicated `.ps1` installer will be added later to make the command much shorter.
+
+---
+
 ## Quick start / Быстрый запуск
 
 1. Download and extract the project or release archive.
