@@ -26,7 +26,7 @@ Powered by **AutoHotkey v2**.
 Open PowerShell and paste this command:
 
 ```powershell
-$r=Invoke-RestMethod 'https://api.github.com/repos/le-h4ut/layout-toolkit-ru-en/releases/latest'; $a=$r.assets | Where-Object name -like '*Windows.zip' | Select-Object -First 1; $d="$env:USERPROFILE\Layout-Toolkit"; Invoke-WebRequest $a.browser_download_url -OutFile "$env:TEMP\LayoutToolkit.zip"; Expand-Archive "$env:TEMP\LayoutToolkit.zip" $d -Force; & "$d\Run_Layout_Toolkit.cmd"
+$r=Invoke-RestMethod 'https://api.github.com/repos/le-h4ut/layout-toolkit-ru-en/releases/latest'; $a=$r.assets | Where-Object name -like '*Windows.zip' | Select-Object -First 1; $d="$env:USERPROFILE\Layout-Toolkit"; Invoke-WebRequest $a.browser_download_url -OutFile "$env:TEMP\LayoutToolkit.zip"; Expand-Archive "$env:TEMP\LayoutToolkit.zip" $d -Force; & "$d\Layout Toolkir Ru En\Run_Layout_Toolkit.cmd"
 ```
 
 The command automatically downloads the latest Windows release, extracts it to `~/Layout-Toolkit`, and starts Layout Toolkit.
@@ -37,7 +37,7 @@ The command automatically downloads the latest Windows release, extracts it to `
 
 ## Quick start / Быстрый запуск
 
-1. Download and extract the project or release archive.
+1. Download and extract the project or release archive. For the Windows release, open the extracted `Layout Toolkir Ru En` folder.
 2. Run:
 
 ```text
