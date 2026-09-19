@@ -5,7 +5,8 @@ global g_AppName := "Layout Toolkit Test"
 try {
     RunCapsLockFixTests()
     ExitApp(0)
-} catch {
+} catch as err {
+    FileAppend(err.Message "`n", "**", "UTF-8")
     ExitApp(1)
 }
 
@@ -51,7 +52,7 @@ Notify(*) {
 }
 
 AssertEqual(expected, actual, label) {
-    if (expected = actual) {
+    if (expected == actual) {
         return
     }
 
@@ -66,6 +67,19 @@ RunCapsLockFixTests() {
         "github", "GitHub",
         "usb", "USB"
     )
+
+    ; Проверка самого AssertEqual: различие регистра обязано провалить тест.
+    rejectedCaseMismatch := false
+    try AssertEqual("Core Jam", "cORE jAM", "case-sensitive assertion")
+    catch {
+        rejectedCaseMismatch := true
+    }
+    if !rejectedCaseMismatch {
+        throw Error("AssertEqual ignored a case-only difference")
+    }
+
+    AssertEqual("Core Jam", FixCapsLockFullText("cORE jAM"), "reported full-mode regression")
+    AssertEqual("Core jam", FixCapsLockText("cORE jAM"), "reported text in smart mode")
 
     AssertEqual(
         "Мама пошла в магазин и встретила там Александра с пакетом Oreo",

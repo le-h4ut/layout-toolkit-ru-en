@@ -52,7 +52,8 @@ CapsFix_ReplaceSelectedText(mode) {
 
     result := isFullMode ? FixCapsLockFullText(text) : FixCapsLockText(text)
 
-    if (result = text) {
+    ; Изменение только регистра тоже требует вставки результата.
+    if (result == text) {
         A_Clipboard := oldClipboard
         Notify("В выделенном тексте нечего исправлять", title, "Iconi")
         return
