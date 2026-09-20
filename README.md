@@ -83,7 +83,7 @@ It does not modify the working installation or the real user profile.
 Open PowerShell and paste this command:
 
 ```powershell
-irm https://raw.githubusercontent.com/ToPoR007/layout-toolkit-ru-en/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1 | iex
 ```
 
 The installer asks where to place Layout Toolkit, verifies the release archive and

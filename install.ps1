@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$manifestUrl = 'https://raw.githubusercontent.com/ToPoR007/layout-toolkit-ru-en/main/latest.json'
+$manifestUrl = 'https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/latest.json'
 $stateDir = Join-Path $env:LOCALAPPDATA 'Layout Toolkit'
 $statePath = Join-Path $stateDir 'install.json'
 $startupPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Layout Toolkit.lnk'
