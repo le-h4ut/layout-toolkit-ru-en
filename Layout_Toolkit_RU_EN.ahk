@@ -5,6 +5,8 @@
 #Include Modules\UnicodeInput.ahk
 #Include Modules\CapsLockFix.ahk
 #Include Modules\SettingsGui.ahk
+#Include Modules\WebSettings.ahk
+#Include Modules\WebUnicodeInput.ahk
 
 ; ============================================================
 ; Layout Toolkit RU/EN
@@ -521,6 +523,10 @@ if (firstRunDone != "1") {
 ; Горячие клавиши читаются из Documents\Layout Toolkit\hotkeys.ini.
 ; Важно: RegisterHotkeys() должен быть ДО первых статических hotkey-строк.
 RegisterHotkeys()
+; Unicode Input is used frequently: prepare its hidden WebView shortly after
+; startup, then reuse it instead of paying the browser startup cost per call.
+SetTimer(ObjBindMethod(LTWebUnicodeInput, "Prewarm"), -1500)
+OnExit((*) => LTWebUnicodeInput.Dispose())
 
 ; Сброс буфера при клике мышью.
 ~LButton::HandleLiveContextBreak()

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Unicode Input</title>
+  <link rel="stylesheet" href="unicode.css">
+  <script src="unicode.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand"><span class="mark">Ω</span><div><h1>Unicode Input</h1><p id="description">Подключаем интерфейс…</p></div></div>
+      <span id="mode-badge" class="badge">Вставка</span>
+    </header>
+
+    <section class="composer" aria-labelledby="input-label">
+      <label id="input-label" for="code-input">Unicode-код в HEX</label>
+      <div class="input-row">
+        <input id="code-input" type="text" spellcheck="false" autocomplete="off" maxlength="512" placeholder="Например: 2014 или 0060 2014 0060">
+        <output id="preview" aria-live="polite">—</output>
+        <button id="apply" class="primary">Вставить</button>
+      </div>
+      <p class="input-hint">Можно вводить A–F в русской раскладке: Ф, И, С, В, У, А.</p>
+    </section>
+
+    <section class="lists">
+      <article class="panel">
+        <div class="panel-title"><div><span class="panel-icon">★</span><h2>Избранное</h2></div><kbd id="favorite-shortcut">Shift+1…5</kbd></div>
+        <div id="favorites" class="items"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-title"><div><span class="panel-icon clock">↺</span><h2>Недавние</h2></div><kbd id="history-shortcut">Ctrl+1…5</kbd></div>
+        <div id="history" class="items"></div>
+      </article>
+    </section>
+
+    <details id="options">
+      <summary>Параметры быстрого выбора</summary>
+      <div class="options-grid">
+        <label class="check"><input id="confirm" type="checkbox"><span>Подтверждать выбор клавишей Enter</span></label>
+        <label class="check"><input id="move-history" type="checkbox"><span>Поднимать использованный символ</span></label>
+        <label>История<select id="history-modifier"><option>Ctrl</option><option>Shift</option><option>Alt</option><option>Win</option><option>Tab</option></select><small>+ 1…5</small></label>
+        <label>Избранное<select id="favorite-modifier"><option>Ctrl</option><option>Shift</option><option>Alt</option><option>Win</option><option>Tab</option></select><small>+ 1…5</small></label>
+      </div>
+    </details>
+  </main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

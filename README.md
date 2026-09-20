@@ -17,7 +17,64 @@ Powered by **AutoHotkey v2**.
 - CapsLock Full Fix: invert the case of every RU/EN letter.
 - CapsLock Fix: normalize accidental CapsLock case with smart analysis.
 - Settings GUI with hotkeys, exclusions and live-mode settings.
+- Local web settings with light and dark themes hosted in WebView2 (development version).
 - User files stored in `Documents\Layout Toolkit`.
+
+---
+
+## Web settings / Веб-настройки
+
+The Git version uses a local HTML/CSS/JavaScript settings window hosted in
+Microsoft Edge WebView2. This is not a website: no HTTP server or internet connection
+is needed for the interface. AutoHotkey still handles conversion and Windows input.
+The settings window and Unicode Input use the web UI. Training and confirmation
+dialogs remain native for now.
+
+The appearance switch in the settings header changes both web windows. The selected
+theme is stored in the `[Appearance]` section of `settings.ini` and is reused after
+restart. The native Windows title bars follow the same theme through DWM and update
+without recreating either window; early Windows 10 builds use the legacy attribute
+fallback.
+
+Unicode Input keeps the existing HEX parser, insertion engine, recent symbols,
+automatic favorites and configurable `1…5` shortcuts. The new window places
+favorites and history side by side and adapts from 650×500 down to 560×400.
+Its WebView is prepared in the background shortly after Toolkit starts and stays
+hidden after use, so repeated openings do not recreate the browser runtime.
+
+Light and dark themes are available from the switch in the settings header. Open the
+window from the tray's settings item.
+Live, Unicode and hotkey edits are applied with **Save**; navigating away from a
+changed section prompts to save or discard the draft. Closing the window hides it
+and keeps the draft until the application exits.
+
+Requires the **Microsoft Edge WebView2 Runtime**. If it cannot initialize, the old
+settings window opens with an explanation. No runtime is installed automatically.
+The WebView2 profile is stored under `%LocalAppData%\Layout Toolkit\WebView2`;
+application settings remain in `Documents\Layout Toolkit`.
+
+When packaging Windows builds, include `Assets\WebSettings`, `Assets\WebUnicodeInput`
+and `Modules\Vendor`
+in addition to the existing runtime files. Dependency licenses are documented in
+`Modules\Vendor\README.md`. Do not include `Tests` or Linux files in Windows ZIPs.
+
+Developer checks, with AutoHotkey v2 installed:
+
+```powershell
+.\Tests\Run-WebSettingsTests.ps1
+.\Tests\Run-WebSettingsTests.ps1 -BrowserTests
+.\Tests\Run-WebSettingsTests.ps1 -UnicodeBrowserTests
+.\Tests\Run-WebSettingsTests.ps1 -PrewarmTests
+.\Tests\Run-WebSettingsTests.ps1 -Preview
+.\Tests\Run-WebSettingsTests.ps1 -UnicodePreview
+```
+
+These create an isolated temporary copy with separate settings and WebView2 data.
+Global hotkey registration is replaced by test doubles. `-BrowserTests` exercises
+the real web/native message bridge and saves rendering snapshots in that temporary
+directory. The Unicode variants do the same for Unicode Input. Preview switches keep
+the test window running; stop the reported PID after use.
+It does not modify the working installation or the real user profile.
 
 ---
 
@@ -26,12 +83,13 @@ Powered by **AutoHotkey v2**.
 Open PowerShell and paste this command:
 
 ```powershell
-$r=Invoke-RestMethod 'https://api.github.com/repos/le-h4ut/layout-toolkit-ru-en/releases/latest'; $a=$r.assets | Where-Object name -like '*Windows.zip' | Select-Object -First 1; $d="$env:USERPROFILE\Layout-Toolkit"; Invoke-WebRequest $a.browser_download_url -OutFile "$env:TEMP\LayoutToolkit.zip"; Expand-Archive "$env:TEMP\LayoutToolkit.zip" $d -Force; & "$d\Layout Toolkir Ru En\Run_Layout_Toolkit.cmd"
+irm https://raw.githubusercontent.com/ToPoR007/layout-toolkit-ru-en/main/install.ps1 | iex
 ```
 
-The command automatically downloads the latest Windows release, extracts it to `~/Layout-Toolkit`, and starts Layout Toolkit.
-
-> **Note:** This is a temporary solution. A dedicated `.ps1` installer will be added later to make the command much shorter.
+The installer asks where to place Layout Toolkit, verifies the release archive and
+starts the application. Running the same command again updates the detected
+installation. Installation information is stored in
+`%LocalAppData%\Layout Toolkit\install.json`.
 
 ---
 

@@ -42,7 +42,7 @@ g_HotkeyCaptureActive := false
 g_HotkeyCaptureModifiers := Map()
 
 
-OpenSettingsGui(*) {
+OpenNativeSettingsGui(*) {
     global g_SettingsGui, g_SettingsContentTitle, g_SettingsContentBody
     global g_SettingsActionBtn1, g_SettingsActionBtn2, g_SettingsActionBtn3
     global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceLabel, g_SettingsLiveDoubleSpaceEdit

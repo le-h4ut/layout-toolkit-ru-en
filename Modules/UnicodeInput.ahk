@@ -26,7 +26,7 @@ g_UnicodeInputHistory := []
 g_UnicodeInputGuiStates := Map()
 
 
-UnicodeInput(mode := "insert") {
+OpenNativeUnicodeInput(mode := "insert") {
     global g_UnicodeInputGuiStates
 
     mode := StrLower(Trim(mode))
@@ -1060,6 +1060,8 @@ UnicodeInput_RefreshOpenGuiSettings() {
             try UnicodeInput_RegisterGuiHotkeys(state.Gui)
         }
     }
+
+    try LTWebUnicodeInput.RefreshSettings()
 }
 
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Layout Toolkit — Настройки</title>
+  <link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">LT</span><div>Layout Toolkit<small>Слова на своём месте</small></div></div>
+    <div class="nav-label">НАСТРОЙКИ</div>
+    <nav aria-label="Разделы настроек" id="navigation">
+      <button data-page="general" class="active"><span>⌂</span>Обзор</button>
+      <button data-page="layout"><span>⇄</span>Раскладка</button>
+      <button data-page="live"><span>ϟ</span>Live-режим</button>
+      <button data-page="hotkeys"><span>⌘</span>Горячие клавиши</button>
+      <button data-page="unicode"><span>Ω</span>Unicode</button>
+      <button data-page="caps"><span>Aa</span>Регистр</button>
+      <button data-page="exclude"><span>≠</span>Исключения</button>
+      <button data-page="about"><span>ⓘ</span>О программе</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span>Работает локально<small id="version">Layout Toolkit</small></div>
+  </aside>
+  <main>
+    <header><div><div class="eyebrow">ВАШ РАБОЧИЙ РИТМ</div><h1 id="title">Обзор</h1></div><button id="theme-toggle" class="theme" type="button" aria-label="Переключить на тёмную тему">☀ Светлая тема</button></header>
+    <section id="content" aria-label="Настройки раздела"><div class="card empty">Подключаем настройки…</div></section>
+    <footer id="savebar" hidden><span>Есть несохранённые изменения</span><div><button id="discard">Отменить</button><button id="save" class="primary">Сохранить</button></div></footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="unsaved"><h2>Сохранить изменения?</h2><p>В этом разделе есть несохранённые настройки.</p><div class="dialog-actions"><button data-choice="stay">Остаться</button><button data-choice="discard">Не сохранять</button><button data-choice="save" class="primary">Сохранить</button></div></dialog>
+</body>
+</html>

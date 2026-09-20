@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "channel": "prerelease",
+  "version": "1.5.0-beta.1",
+  "published_at": "2026-09-20T15:19:48Z",
+  "release_notes_url": "https://github.com/ToPoR007/layout-toolkit-ru-en/releases/tag/v1.5.0-beta.1",
+  "requirements": {
+    "windows_min_build": 17763,
+    "architecture": ["x64", "x86"]
+  },
+  "assets": {
+    "windows": {
+      "url": "https://github.com/ToPoR007/layout-toolkit-ru-en/releases/download/v1.5.0-beta.1/Layout_Toolkit_RU_EN_v1.5.0-beta.1_Windows.zip",
+      "size": 341750,
+      "sha256": "4C2F9CF0319E0469DA5771E15DD9B998FC83C67A0534E2A2E155B19AA009A302"
+    }
+  }
+}
