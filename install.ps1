@@ -136,7 +136,13 @@ try {
         autostart = !$NoAutostart
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
-    if ($NoAutostart) { Remove-StartupShortcut } else { Set-StartupShortcut $target }
+    if ($NoAutostart) {
+        if ($state -and $state.installPath -and ([IO.Path]::GetFullPath([string]$state.installPath).TrimEnd('\') -eq $target)) {
+            Remove-StartupShortcut
+        }
+    } else {
+        Set-StartupShortcut $target
+    }
     if ($previousMoved -and (Test-Path -LiteralPath $backupPath)) { Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction SilentlyContinue }
 
     Write-Host "Layout Toolkit $($manifest.version) установлен в $target" -ForegroundColor Green
