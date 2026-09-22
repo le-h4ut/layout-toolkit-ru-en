@@ -27,8 +27,8 @@ Powered by **AutoHotkey v2**.
 The Git version uses a local HTML/CSS/JavaScript settings window hosted in
 Microsoft Edge WebView2. This is not a website: no HTTP server or internet connection
 is needed for the interface. AutoHotkey still handles conversion and Windows input.
-The settings window and Unicode Input use the web UI. Training and confirmation
-dialogs remain native for now.
+The settings window, Unicode Input and quick-start guide use the web UI.
+Confirmation dialogs remain native for now.
 
 The appearance switch in the settings header changes both web windows. The selected
 theme is stored in the `[Appearance]` section of `settings.ini` and is reused after
@@ -45,16 +45,17 @@ hidden after use, so repeated openings do not recreate the browser runtime.
 Light and dark themes are available from the switch in the settings header. Open the
 window from the tray's settings item.
 Live, Unicode and hotkey edits are applied with **Save**; navigating away from a
-changed section prompts to save or discard the draft. Closing the window hides it
-and keeps the draft until the application exits.
+changed section prompts to save or discard the draft. Opening settings shows a
+small loading window until the web UI is ready. Closing settings releases its
+WebView2 controller and discards unsaved drafts; the next opening loads it again.
 
 Requires the **Microsoft Edge WebView2 Runtime**. If it cannot initialize, the old
 settings window opens with an explanation. No runtime is installed automatically.
 The WebView2 profile is stored under `%LocalAppData%\Layout Toolkit\WebView2`;
 application settings remain in `Documents\Layout Toolkit`.
 
-When packaging Windows builds, include `Assets\WebSettings`, `Assets\WebUnicodeInput`
-and `Modules\Vendor`
+When packaging Windows builds, include `Assets\WebSettings`, `Assets\WebUnicodeInput`,
+`Assets\WebWelcome` and `Modules\Vendor`
 in addition to the existing runtime files. Dependency licenses are documented in
 `Modules\Vendor\README.md`. Do not include `Tests` or Linux files in Windows ZIPs.
 
@@ -63,8 +64,13 @@ Developer checks, with AutoHotkey v2 installed:
 ```powershell
 .\Tests\Run-WebSettingsTests.ps1
 .\Tests\Run-WebSettingsTests.ps1 -BrowserTests
+.\Tests\Run-WebSettingsTests.ps1 -SettingsLifecycleTests
+.\Tests\Run-WebSettingsTests.ps1 -WelcomeBrowserTests
 .\Tests\Run-WebSettingsTests.ps1 -UnicodeBrowserTests
 .\Tests\Run-WebSettingsTests.ps1 -PrewarmTests
+.\Tests\Install.Tests.ps1
+.\Tests\Run-LiveInputLanguageTests.ps1
+.\Tests\Run-LiveInputLanguageTests.ps1 -RealInput
 .\Tests\Run-WebSettingsTests.ps1 -Preview
 .\Tests\Run-WebSettingsTests.ps1 -UnicodePreview
 ```
@@ -95,7 +101,7 @@ installation. Installation information is stored in
 
 ## Quick start / Быстрый запуск
 
-1. Download and extract the project or release archive. For the Windows release, open the extracted `Layout Toolkir Ru En` folder.
+1. Download and extract the project or release archive. For the Windows release, open the extracted `Layout Toolkit Ru En` folder.
 2. Run:
 
 ```text
@@ -170,6 +176,11 @@ becomes:
 
 Live mode fixes the current typed fragment using one of two alternative triggers. Double space is selected by default and leaves one trailing space after conversion. The live hotkey (`Win + F9` by default) performs the same conversion without adding anything at the end.
 
+Live replaces text using Unicode keyboard input and leaves the clipboard unchanged.
+Paragraph breaks, tabs, and alphabet changes between words limit the current fragment.
+Typing during replacement is queued. If focus changes before queued text is released,
+use **Копировать отложенный ввод** in the tray menu to recover it explicitly.
+
 ```text
 Z gbie ntrcn/  
 ```
@@ -180,7 +191,7 @@ becomes:
 Я пишу текст. 
 ```
 
-Live mode sends synthetic `Backspace` and paste actions, so it is best for messengers, search fields and short input fields.
+Live mode sends synthetic `Backspace` and Unicode text input, so it is best for messengers, search fields and short input fields.
 
 For long documents, use selected-text conversion instead.
 

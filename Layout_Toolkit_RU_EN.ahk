@@ -7,6 +7,7 @@
 #Include Modules\SettingsGui.ahk
 #Include Modules\WebSettings.ahk
 #Include Modules\WebUnicodeInput.ahk
+#Include Modules\WebWelcome.ahk
 
 ; ============================================================
 ; Layout Toolkit RU/EN
@@ -27,7 +28,7 @@
 ;   набранный фрагмент меняется в противоположную раскладку.
 ;
 ; ВАЖНО:
-;   live-режим сам нажимает Backspace и Ctrl+V.
+;   live-режим сам нажимает Backspace и вводит Unicode-текст.
 ;   Для больших документов лучше держать live выключенным.
 ; ============================================================
 
@@ -89,11 +90,17 @@ if FileExist(g_IconPath) {
 global g_LiveEnabled := IniRead(g_ConfigPath, "General", "LiveEnabled", "0") = "1"
 global g_LiveTriggerMode := ReadLiveTriggerMode()
 global g_DoubleSpaceMs := ReadLiveDoubleSpaceMs()
+global g_LiveSwitchInputLanguage := IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage", "0") = "1"
 global g_ShowFirstToggleHint := IniRead(g_ConfigPath, "General", "ShowFirstToggleHint", "1") = "1"
 global g_FirstToggleHintShown := IniRead(g_ConfigPath, "General", "FirstToggleHintShown", "0") = "1"
 
 global g_LiveBusy := false
 global g_LivePendingBuffer := ""
+global g_LiveRecoveryBuffer := ""
+global g_LivePendingDirection := ""
+global g_LivePendingBackspaces := 0
+global g_LiveOperationFocus := 0
+global g_LivePendingKeyText := ""
 global g_LiveContextInvalidated := false
 global g_LiveOperationWindow := 0
 global g_Buffer := ""
@@ -701,6 +708,7 @@ HotkeyToDisplay(hotkeyName) {
 SetupTrayMenu() {
     global g_AppName, g_ShowTrayTips, g_PlaySound, g_LiveEnabled
     global g_HotkeyLiveToggle
+    global g_LiveRecoveryBuffer
 
     A_TrayMenu.Delete()
 
@@ -709,6 +717,8 @@ SetupTrayMenu() {
     A_TrayMenu.Add("Открыть папку данных", OpenUserDataDir)
     A_TrayMenu.Add("Открыть словарь исключений", OpenExcludeFile)
     A_TrayMenu.Add("Применить изменения словаря", ReloadExcludeWords)
+    if (g_LiveRecoveryBuffer != "")
+        A_TrayMenu.Add("Копировать отложенный ввод", CopyLiveRecovery)
     A_TrayMenu.Add()
 
     A_TrayMenu.Add("Показывать уведомления", ToggleTrayTips)
@@ -984,66 +994,40 @@ ShowLiveFirstToggleHint() {
 }
 
 ShowTrainingGui(isFirstRun := false) {
+    LTWebWelcome.Open(isFirstRun)
+}
+
+ShowNativeTrainingGui(isFirstRun := false) {
     global g_LiveEnabled, g_AppName
     global g_HotkeyLayoutFull, g_HotkeyLayoutMajority, g_HotkeyLiveToggle
-    global g_HotkeyLiveConvert, g_HotkeyUnicodeInput, g_HotkeyCapsLockFix
-    global g_HotkeyCapsLockFullFix
+    global g_HotkeyLiveConvert, g_HotkeyUnicodeInput
 
     guiObj := Gui("+AlwaysOnTop", g_AppName " — краткая справка")
-    guiObj.SetFont("s10", "Segoe UI")
-
-    guiObj.SetFont("s12 bold", "Segoe UI")
-    guiObj.AddText("x20 y16 w600 h26", "Layout Toolkit — исправление текста и ввод Unicode")
-
+    guiObj.BackColor := "F5F7FA"
+    LTApplyWindowTheme(guiObj.Hwnd, "Light")
+    guiObj.SetFont("s15 bold", "Segoe UI")
+    guiObj.AddText("x22 y18 w540 h32", "Layout Toolkit")
     guiObj.SetFont("s9 norm", "Segoe UI")
-    guiObj.AddText("x20 y45 w600 h36", "Программа работает в фоне. Основные функции доступны через горячие клавиши, меню в трее и настройки.")
-    
-    body := ""
-    body .= "1. Исправление раскладки`r`n"
-    body .= "Сначала выделите текст.`r`n"
-    body .= "Полное исправление: " HotkeyToDisplay(g_HotkeyLayoutFull) " — определяет направление отдельно для каждого слова и меняет символы по раскладке.`r`n"
-    body .= "Слова из словаря исключений остаются без изменений.`r`n"
-    body .= "По большинству: " HotkeyToDisplay(g_HotkeyLayoutMajority) " — подходит для смешанного текста.`r`n"
-    body .= "`r`n"
-
-    body .= "2. Live-режим`r`n"
-    body .= "Переключение: " HotkeyToDisplay(g_HotkeyLiveToggle) ".`r`n"
-    body .= "Двойной пробел исправляет текущий фрагмент и оставляет один пробел в конце.`r`n"
-    body .= "Альтернативный запуск по хоткею: " HotkeyToDisplay(g_HotkeyLiveConvert) ". Он ничего не добавляет в конец.`r`n"
-    body .= "В настройках выбирается только один активный способ запуска.`r`n"
-    body .= "`r`n"
-
-    body .= "3. Unicode Input`r`n"
-    body .= "Хоткей: " HotkeyToDisplay(g_HotkeyUnicodeInput) ".`r`n"
-    body .= "Введите HEX-код, например 2014 → — или 1F600 → 😀.`r`n"
-    body .= "В окне доступны недавние символы и избранные последовательности.`r`n"
-    body .= "Из настроек Unicode Input можно открыть в режиме копирования.`r`n"
-    body .= "`r`n"
-
-    body .= "4. Исправление CapsLock`r`n"
-    body .= "Полный режим: " HotkeyToDisplay(g_HotkeyCapsLockFullFix) " — инвертирует регистр каждой буквы.`r`n"
-    body .= "Умный режим: " HotkeyToDisplay(g_HotkeyCapsLockFix) " — приводит ошибочный регистр к обычному написанию.`r`n"
-    body .= "Словарь исключений сохраняет точное написание слов, например PowerShell и GitHub.`r`n"
-    body .= "`r`n"
-
-    body .= "5. Настройки`r`n"
-    body .= "Двойной щелчок по значку Layout Toolkit в трее открывает настройки.`r`n"
-    body .= "Там можно управлять Live-режимом, горячими клавишами и словарём исключений.`r`n"
-    body .= "`r`n"
-
-    body .= "Для больших фрагментов используйте Layout Fix по выделению; Live-режим рассчитан на короткий текст во время набора."
-
+    guiObj.AddText("x22 y53 w540 h30", "Работает в фоне. Здесь — самое важное для старта.")
+    guiObj.SetFont("s10 bold", "Segoe UI")
+    guiObj.AddText("x22 y94 w540 h22", "Выделенный текст")
     guiObj.SetFont("s9 norm", "Segoe UI")
-    bodyEdit := guiObj.AddEdit("x20 y90 w600 h300 ReadOnly +Wrap VScroll -Tabstop", body)
-
-    chk := guiObj.AddCheckbox("vStartLive x20 y405 w600 h24", "Включить Live-режим")
+    guiObj.AddText("x22 y118 w540 h36", "Полное исправление: " HotkeyToDisplay(g_HotkeyLayoutFull) "`nПо большинству: " HotkeyToDisplay(g_HotkeyLayoutMajority))
+    guiObj.SetFont("s10 bold", "Segoe UI")
+    guiObj.AddText("x22 y162 w540 h22", "Live во время набора")
+    guiObj.SetFont("s9 norm", "Segoe UI")
+    guiObj.AddText("x22 y186 w540 h36", "Двойной пробел или " HotkeyToDisplay(g_HotkeyLiveConvert) " — способ выбирается в настройках.`nВключить или выключить: " HotkeyToDisplay(g_HotkeyLiveToggle))
+    guiObj.SetFont("s10 bold", "Segoe UI")
+    guiObj.AddText("x22 y230 w540 h22", "Unicode Input")
+    guiObj.SetFont("s9 norm", "Segoe UI")
+    guiObj.AddText("x22 y254 w540 h20", HotkeyToDisplay(g_HotkeyUnicodeInput) " — введите HEX-код символа, например 2014 → —.")
+    chk := guiObj.AddCheckbox("vStartLive x22 y292 w540 h24", "Включить Live-режим")
     chk.Value := g_LiveEnabled ? 1 : 0
 
-    primaryLabel := isFirstRun ? "Сохранить и больше не показывать" : "Сохранить"
-    closeLabel := isFirstRun ? "Закрыть без сохранения" : "Закрыть"
-    btnOk := guiObj.AddButton("Default x20 y445 w245 h32", primaryLabel)
-    btnSettings := guiObj.AddButton("x280 y445 w165 h32", "Открыть настройки")
-    btnCloseOnly := guiObj.AddButton("x460 y445 w160 h32", closeLabel)
+    primaryLabel := isFirstRun ? "Начать" : "Сохранить"
+    btnOk := guiObj.AddButton("Default x22 y332 w170 h34", primaryLabel)
+    btnSettings := guiObj.AddButton("x202 y332 w170 h34", "Настройки")
+    btnCloseOnly := guiObj.AddButton("x382 y332 w180 h34", "Закрыть")
 
     btnOk.OnEvent("Click", (*) => TrainingGuiOk(guiObj))
     btnSettings.OnEvent("Click", (*) => OpenSettingsGui())
@@ -1051,7 +1035,7 @@ ShowTrainingGui(isFirstRun := false) {
 
     guiObj.OnEvent("Close", (*) => TrainingGuiCloseOnlyNow(guiObj, isFirstRun))
 
-    guiObj.Show("w640 h500")
+    guiObj.Show("w585 h390")
     btnOk.Focus()
 }
 
@@ -1083,6 +1067,10 @@ TrainingGuiCloseOnlyNow(guiObj, isFirstRun := false) {
 
 SetLiveMode(enabled, showNotify := true, showFirstHint := true) {
     global g_LiveEnabled, g_ConfigPath, g_AppName, ih
+    global g_LiveBusy
+
+    if g_LiveBusy
+        return false
 
     enabled := enabled ? true : false
     oldEnabled := g_LiveEnabled
@@ -1444,7 +1432,7 @@ HandleLiveContextBreak(*) {
     global g_LiveContextInvalidated, g_LiveOperationWindow
 
     if g_LiveBusy {
-        g_LivePendingBuffer := ""
+        PreserveLivePending()
         g_LiveContextInvalidated := true
         g_LiveOperationWindow := WinExist("A")
     }
@@ -1453,30 +1441,83 @@ HandleLiveContextBreak(*) {
 }
 
 
+PreserveLivePending() {
+    global g_LivePendingBuffer, g_LiveRecoveryBuffer
+    if (g_LivePendingBuffer != "") {
+        g_LiveRecoveryBuffer .= g_LivePendingBuffer
+        g_LivePendingBuffer := ""
+        A_TrayMenu.Add("Копировать отложенный ввод", CopyLiveRecovery)
+        Notify("Место ввода изменилось. Отложенный текст сохранён в меню значка программы.", "Layout Toolkit", "Icon!")
+    }
+}
+
+CopyLiveRecovery(*) {
+    global g_LiveRecoveryBuffer
+    A_Clipboard := g_LiveRecoveryBuffer
+}
+
+
+SetLiveInputBuffering(enabled) {
+    global ih
+
+    ih.VisibleText := !enabled
+    ih.KeyOpt("{All}", enabled ? "+N" : "-N")
+    ih.KeyOpt("{Backspace}", enabled ? "+NS" : "-NS")
+    ih.KeyOpt("{Enter}{Tab}{Escape}{Left}{Right}{Up}{Down}{Home}{End}{Delete}{PgUp}{PgDn}", enabled ? "+V" : "-V")
+}
+
+
 SyncLivePendingContext() {
     global g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
+    global g_LiveOperationFocus
 
     currentWindow := WinExist("A")
 
-    if (g_LiveOperationWindow && currentWindow != g_LiveOperationWindow) {
-        g_LivePendingBuffer := ""
+    if (g_LiveOperationWindow && (currentWindow != g_LiveOperationWindow
+        || (g_LiveOperationFocus && GetLiveInputTargetHwnd(currentWindow) != g_LiveOperationFocus))) {
+        PreserveLivePending()
         g_LiveContextInvalidated := true
         g_LiveOperationWindow := currentWindow
+        g_LiveOperationFocus := GetLiveInputTargetHwnd(currentWindow)
     }
 }
 
 
 AppendLivePendingChar(char) {
     global g_LivePendingBuffer
-    global g_MaxBufferChars
+    global g_LivePendingDirection, g_LiveContextInvalidated
+    global g_LivePendingKeyText
 
     SyncLivePendingContext()
-    g_LivePendingBuffer .= char
-
-    if (StrLen(g_LivePendingBuffer) > g_MaxBufferChars) {
-        g_LivePendingBuffer := SubStr(g_LivePendingBuffer, StrLen(g_LivePendingBuffer) - g_MaxBufferChars + 1)
+    if (!g_LiveContextInvalidated && g_LivePendingDirection != "") {
+        ; A key notification precedes its character notification. Translate
+        ; physical keys with the target HKL, independent of switch timing.
+        char := g_LivePendingKeyText != "" ? g_LivePendingKeyText
+            : NormalizeLivePendingText(char, g_LivePendingDirection)
     }
+    g_LivePendingKeyText := ""
+    g_LivePendingBuffer .= char
+}
+
+
+TranslateLivePendingKey(vk, sc) {
+    global g_LivePendingDirection
+    if (g_LivePendingDirection = "" || vk = 0xE7)
+        return ""
+    hkl := FindInstalledKeyboardLayout(g_LivePendingDirection)
+    if !hkl
+        return ""
+    state := Buffer(256, 0)
+    if !DllCall("GetKeyboardState", "Ptr", state)
+        return ""
+    NumPut("UChar", GetKeyState("Shift") ? 0x80 : 0, state, 0x10)
+    NumPut("UChar", GetKeyState("CapsLock", "T") ? 1 : 0, state, 0x14)
+    output := Buffer(32, 0)
+    ; Flag 4 avoids changing the thread's dead-key state (Windows 10 1607+).
+    count := DllCall("ToUnicodeEx", "UInt", vk, "UInt", sc, "Ptr", state,
+        "Ptr", output, "Int", 16, "UInt", 4, "Ptr", hkl, "Int")
+    return count > 0 ? StrGet(output, count, "UTF-16") : ""
 }
 
 
@@ -1489,40 +1530,60 @@ HandleLiveSpaceWhileBusy() {
     SyncLivePendingContext()
     g_LivePendingBuffer .= " "
 
-    if (StrLen(g_LivePendingBuffer) > g_MaxBufferChars) {
-        g_LivePendingBuffer := SubStr(g_LivePendingBuffer, StrLen(g_LivePendingBuffer) - g_MaxBufferChars + 1)
-    }
 
-    SendPlainSpace()
+    ; Text input is hidden by InputHook until the active Live operation ends.
 }
 
 
-FlushLivePendingAfterOperation(replacementApplied := true, contextInvalidated := false) {
+NormalizeLivePendingText(text, direction) {
+    if (direction = "") {
+        return text
+    }
+
+    table := GetConversionTable(direction)
+    out := ""
+
+    for ch in StrSplit(text) {
+        ; Only letters from the source layout are normalized. Characters which
+        ; were already produced by the target layout remain untouched.
+        out .= DirectionFromChar(ch) = direction && table.Has(ch) ? table[ch] : ch
+    }
+
+    return out
+}
+
+
+FlushLivePendingAfterOperation(replacementApplied := true, contextInvalidated := false, pendingDirection := "") {
     global g_LivePendingBuffer
     global g_Buffer
+    global g_LivePendingBackspaces
 
     pendingBuffer := g_LivePendingBuffer
 
+    if (pendingBuffer = "" && !g_LivePendingBackspaces) {
+        return
+    }
+
+    pendingOutput := pendingBuffer
+
+    ; Physical text stayed hidden while Live was busy. Release it only after
+    ; the replacement and the input-language request have completed.
+    pendingSequence := (contextInvalidated || !g_LivePendingBackspaces)
+        ? "" : "{Backspace " g_LivePendingBackspaces "}"
+    SendInput pendingSequence "{Text}" pendingOutput
     g_LivePendingBuffer := ""
+    g_LivePendingBackspaces := 0
 
-    ; После перемещения курсора или смены контекста старый фрагмент больше
-    ; нельзя связывать с текущей позицией. Оставляем только новый ввод.
+    ; После перемещения курсора или смены окна связываем буфер только с новым
+    ; местом ввода и не применяем к нему направление старой операции.
     if contextInvalidated {
-        g_Buffer := pendingBuffer
-        RecalculateBufferState()
-        return
-    }
-
-    if (pendingBuffer = "") {
-        return
-    }
-
-    if replacementApplied {
+        g_Buffer := pendingOutput
+    } else if replacementApplied {
         ; Старый фрагмент заменён: pending стал новым текущим фрагментом.
-        g_Buffer := pendingBuffer
+        g_Buffer := pendingOutput
     } else {
         ; Замена не началась: pending уже находится после исходного текста.
-        g_Buffer .= pendingBuffer
+        g_Buffer .= pendingOutput
     }
 
     RecalculateBufferState()
@@ -1530,6 +1591,7 @@ FlushLivePendingAfterOperation(replacementApplied := true, contextInvalidated :=
 
 
 LiveConvertHotkeyPressed(*) {
+    global g_LiveOperationFocus
     global g_LiveEnabled, g_LiveTriggerMode, g_LiveBusy
     global g_Buffer, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
@@ -1558,7 +1620,9 @@ LiveConvertHotkeyPressed(*) {
             g_LivePendingBuffer := ""
             g_LiveContextInvalidated := false
             g_LiveOperationWindow := targetWindow
+            g_LiveOperationFocus := GetLiveInputTargetHwnd(targetWindow)
             g_LiveBusy := true
+            SetLiveInputBuffering(true)
             operationStarted := true
         }
     } finally {
@@ -1574,6 +1638,7 @@ LiveConvertHotkeyPressed(*) {
 
 
 LiveSpacePressed() {
+    global g_LiveOperationFocus
     global g_LiveEnabled, g_LiveTriggerMode, g_LiveBusy
     global g_Buffer, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
@@ -1596,7 +1661,7 @@ LiveSpacePressed() {
             g_LastSpaceTick := 0
 
             if g_LiveBusy {
-                g_LivePendingBuffer := ""
+                PreserveLivePending()
                 g_LiveContextInvalidated := true
             } else {
                 ResetTypingBuffer()
@@ -1655,7 +1720,9 @@ LiveSpacePressed() {
         g_LivePendingBuffer := ""
         g_LiveContextInvalidated := false
         g_LiveOperationWindow := targetWindow
+        g_LiveOperationFocus := GetLiveInputTargetHwnd(targetWindow)
         g_LiveBusy := true
+        SetLiveInputBuffering(true)
         SendPlainSpace()
     } finally {
         Critical "Off"
@@ -1696,6 +1763,9 @@ IH_OnChar(ih, char) {
     if (!g_LiveEnabled || g_HotkeyCaptureActive) {
         return
     }
+
+    if (g_LiveBusy && (char = "`r" || char = "`n" || char = "`t" || char = Chr(27)))
+        return
 
     ; В режиме двойного пробела Space ловит отдельный hotkey. В режиме по
     ; хоткею пробел проходит в приложение сам и здесь только попадает в буфер.
@@ -1813,6 +1883,8 @@ IsHotkeyChordActive(hotkeyName, keyName) {
 
 
 IH_OnKeyDown(ih, vk, sc) {
+    global g_LivePendingBackspaces
+    global g_LivePendingKeyText
     global g_LiveEnabled, g_LiveTriggerMode, g_LiveBusy
     global g_Buffer, g_LastSpaceTick, g_LivePendingBuffer
     global g_LiveContextInvalidated
@@ -1838,22 +1910,39 @@ IH_OnKeyDown(ih, vk, sc) {
     ; Во время busy правим только pending-буфер, не старый основной.
     if g_LiveBusy {
         SyncLivePendingContext()
+        g_LivePendingKeyText := ""
+        if (vk = 0xE7)
+            return
+        if (keyName = "Space" && g_LiveTriggerMode = "DoubleSpace")
+            return
+        if (!GetKeyState("Ctrl") && !GetKeyState("Alt")
+            && !GetKeyState("LWin") && !GetKeyState("RWin")) {
+            translated := TranslateLivePendingKey(vk, sc)
+            if (translated != "" && Ord(translated) >= 32) {
+                g_LivePendingKeyText := translated
+                return
+            }
+            ; Text keys are reported with +N while buffering, even with
+            ; automatic switching disabled. Their OnChar callback owns them.
+            if (StrLen(keyName) = 1 || keyName = "Space")
+                return
+        }
 
         switch keyName {
             case "Backspace":
                 if (StrLen(g_LivePendingBuffer) > 0) {
                     g_LivePendingBuffer := SubStr(g_LivePendingBuffer, 1, StrLen(g_LivePendingBuffer) - 1)
                 } else {
-                    g_LiveContextInvalidated := true
+                    g_LivePendingBackspaces++
                 }
 
             case "Enter", "Tab", "Esc", "Escape", "Left", "Right", "Up", "Down", "Home", "End", "Delete", "PgUp", "PgDn":
-                g_LivePendingBuffer := ""
+                PreserveLivePending()
                 g_LiveContextInvalidated := true
 
             default:
                 if !IsLiveModifierKey(keyName) {
-                    g_LivePendingBuffer := ""
+                    PreserveLivePending()
                     g_LiveContextInvalidated := true
                 }
         }
@@ -1864,6 +1953,13 @@ IH_OnKeyDown(ih, vk, sc) {
     if IsLiveSpaceArmBreakerKey(keyName) {
         g_LastSpaceTick := 0
     }
+
+    ; A text key notification queued while buffering may arrive just after
+    ; buffering ends. Its OnChar callback owns the text, not the reset branch.
+    if (vk = 0xE7 || ((StrLen(keyName) = 1 || keyName = "Space")
+        && !GetKeyState("Ctrl") && !GetKeyState("Alt")
+        && !GetKeyState("LWin") && !GetKeyState("RWin")))
+        return
 
     switch keyName {
         case "Backspace":
@@ -1907,10 +2003,166 @@ TryLiveConvertHotkey(rawFragment, targetWindow) {
 }
 
 
+GetInstalledKeyboardLayouts() {
+    count := DllCall("GetKeyboardLayoutList", "Int", 0, "Ptr", 0, "Int")
+    if (count <= 0) {
+        return []
+    }
+
+    layoutBuffer := Buffer(count * A_PtrSize, 0)
+    actualCount := DllCall("GetKeyboardLayoutList", "Int", count, "Ptr", layoutBuffer.Ptr, "Int")
+    layouts := []
+
+    Loop actualCount {
+        layouts.Push(NumGet(layoutBuffer, (A_Index - 1) * A_PtrSize, "Ptr"))
+    }
+
+    return layouts
+}
+
+
+FindInstalledKeyboardLayout(direction, layouts := unset) {
+    targetPrimaryLanguage := direction = "EN_TO_RU" ? 0x19
+        : direction = "RU_TO_EN" ? 0x09
+        : 0
+
+    if !targetPrimaryLanguage {
+        return 0
+    }
+
+    if !IsSet(layouts) {
+        layouts := GetInstalledKeyboardLayouts()
+    }
+
+    for hkl in layouts {
+        languageId := hkl & 0xFFFF
+        primaryLanguage := languageId & 0x03FF
+
+        if (primaryLanguage = targetPrimaryLanguage) {
+            return hkl
+        }
+    }
+
+    return 0
+}
+
+
+GetLiveInputTargetHwnd(targetWindow) {
+    if (!targetWindow || !DllCall("IsWindow", "Ptr", targetWindow, "Int")) {
+        return 0
+    }
+
+    threadId := DllCall("GetWindowThreadProcessId", "Ptr", targetWindow, "Ptr", 0, "UInt")
+    if !threadId {
+        return targetWindow
+    }
+
+    ; GUITHREADINFO contains two DWORDs, six HWNDs and a RECT.
+    info := Buffer(8 + 6 * A_PtrSize + 16, 0)
+    NumPut("UInt", info.Size, info, 0)
+
+    if DllCall("GetGUIThreadInfo", "UInt", threadId, "Ptr", info.Ptr, "Int") {
+        focusedWindow := NumGet(info, 8 + A_PtrSize, "Ptr")
+
+        if (focusedWindow
+         && DllCall("IsWindow", "Ptr", focusedWindow, "Int")
+         && DllCall("GetAncestor", "Ptr", focusedWindow, "UInt", 2, "Ptr") = targetWindow) {
+            return focusedWindow
+        }
+    }
+
+    return targetWindow
+}
+
+
+PostLiveInputLanguageRequest(inputWindow, hkl) {
+    static WM_INPUTLANGCHANGEREQUEST := 0x0050
+    return !!DllCall("PostMessageW", "Ptr", inputWindow, "UInt", WM_INPUTLANGCHANGEREQUEST, "Ptr", 0, "Ptr", hkl, "Int")
+}
+
+
+GetWindowKeyboardLayout(windowHandle) {
+    threadId := DllCall("GetWindowThreadProcessId", "Ptr", windowHandle, "Ptr", 0, "UInt")
+    return threadId ? DllCall("GetKeyboardLayout", "UInt", threadId, "Ptr") : 0
+}
+
+
+KeyboardLayoutMatchesDirection(hkl, direction) {
+    if !hkl {
+        return false
+    }
+
+    primaryLanguage := (hkl & 0xFFFF) & 0x03FF
+    return direction = "EN_TO_RU" ? primaryLanguage = 0x19
+        : direction = "RU_TO_EN" ? primaryLanguage = 0x09
+        : false
+}
+
+
+TrySwitchLiveInputLanguage(targetWindow, direction) {
+    global g_LiveSwitchInputLanguage
+    global g_LiveContextInvalidated, g_LiveOperationFocus
+
+    if !g_LiveSwitchInputLanguage {
+        return false
+    }
+
+    try {
+        ; Never redirect the request to whichever application became active later.
+        if (g_LiveContextInvalidated || !targetWindow || WinExist("A") != targetWindow) {
+            return false
+        }
+
+        hkl := FindInstalledKeyboardLayout(direction)
+        if !hkl {
+            return false
+        }
+
+        inputWindow := GetLiveInputTargetHwnd(targetWindow)
+        if (!inputWindow || WinExist("A") != targetWindow
+            || (g_LiveOperationFocus && inputWindow != g_LiveOperationFocus)) {
+            return false
+        }
+
+        requestPosted := PostLiveInputLanguageRequest(inputWindow, hkl)
+        if !requestPosted {
+            return false
+        }
+
+        ; PostMessage is asynchronous. Let the focused control process the
+        ; request, then retry through the top-level window only if necessary.
+        Sleep 60
+        if (g_LiveContextInvalidated || WinExist("A") != targetWindow
+            || GetLiveInputTargetHwnd(targetWindow) != inputWindow) {
+            return false
+        }
+
+        if KeyboardLayoutMatchesDirection(GetWindowKeyboardLayout(inputWindow), direction) {
+            return true
+        }
+
+        if (inputWindow != targetWindow) {
+            if !PostLiveInputLanguageRequest(targetWindow, hkl)
+                return false
+            Sleep 60
+        }
+
+        return WinExist("A") = targetWindow
+            && !g_LiveContextInvalidated
+            && GetLiveInputTargetHwnd(targetWindow) = inputWindow
+            && KeyboardLayoutMatchesDirection(GetWindowKeyboardLayout(inputWindow), direction)
+    } catch {
+        ; Layout switching is best effort and never changes conversion success.
+        return false
+    }
+}
+
+
 DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := " ") {
     global g_LiveBusy, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
     global g_LiveBoundarySourcePrefix, g_LiveBoundaryReplacementPrefix
+    global g_LivePendingDirection, g_LiveSwitchInputLanguage
 
     fragment := RTrim(rawFragment, " `t`r`n")
 
@@ -1930,6 +2182,11 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
     }
 
     conversionBody := SubStr(fragment, boundaryPrefixLength + 1)
+    if (RegExMatch(conversionBody, "[A-Za-z]") && RegExMatch(conversionBody, "[А-Яа-яЁё]")) {
+        Notify("В одном фрагменте смешаны алфавиты. Используйте исправление выделенного текста.", title, "Icon!")
+        FinishLiveOperation(false, targetWindow)
+        return false
+    }
     direction := DetectDirectionFromText(conversionBody)
 
     if (direction = "") {
@@ -1953,26 +2210,20 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
         return false
     }
 
-    clipboardSaved := false
     replacementStarted := false
     replacementCompleted := false
+    inputLanguageSwitched := false
+    g_LivePendingDirection := (g_LiveSwitchInputLanguage && FindInstalledKeyboardLayout(direction)) ? direction : ""
 
     try {
-        oldClipboard := ClipboardAll()
-        clipboardSaved := true
-
-        A_Clipboard := ""
-        A_Clipboard := converted . replacementSuffix
-
-        if !ClipWait(0.5) {
-            Notify("Не удалось подготовить исправленный текст. Буфер обмена восстановлен", title, "Icon!")
-        } else if (g_LiveContextInvalidated || WinExist("A") != targetWindow) {
+        SyncLivePendingContext()
+        if (g_LiveContextInvalidated || WinExist("A") != targetWindow) {
             Notify("Исправление отменено: изменилось место ввода", title, "Icon!")
         } else {
             finalContextChanged := false
 
             ; Не позволяем InputHook/click-callback вклиниться между последней
-            ; проверкой контекста, снимком pending и единственным SendInput.
+            ; проверкой контекста и единственным SendInput.
             ; Сам SendInput буферизует физический ввод до конца последовательности.
             Critical "On"
 
@@ -1980,19 +2231,12 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
                 if (g_LiveContextInvalidated || WinExist("A") != targetWindow) {
                     finalContextChanged := true
                 } else {
-                    ; Всё, что пользователь успел допечатать после второго пробела,
-                    ; уже видно в приложении. Удаляем это вместе со старым фрагментом
-                    ; и возвращаем в конце той же SendInput-последовательности.
-                    pendingSnapshot := g_LivePendingBuffer
-                    totalDeleteCount := deleteCount + StrLen(pendingSnapshot)
-                    sendSequence := "{Backspace " . totalDeleteCount . "}^v"
-
-                    if (pendingSnapshot != "") {
-                        sendSequence .= "{Text}" pendingSnapshot
-                    }
+                    ; Новый физический ввод пока скрыт InputHook и будет выпущен
+                    ; отдельно после завершения замены и запроса новой раскладки.
+                    sendSequence := "{Backspace " . deleteCount . "}{Text}" . converted . replacementSuffix
 
                     replacementStarted := true
-                    Send sendSequence
+                    SendInput sendSequence
                     replacementCompleted := true
                     ResetTypingBuffer(false)
                 }
@@ -2003,8 +2247,9 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
             if finalContextChanged {
                 Notify("Исправление отменено: изменилось место ввода", title, "Icon!")
             } else if replacementCompleted {
-                ; Даём приложению прочитать данные буфера до его восстановления.
-                Sleep 450
+                ; Запрашиваем раскладку сразу после успешной замены.
+                ; Clipboard в Live не используется.
+                inputLanguageSwitched := TrySwitchLiveInputLanguage(targetWindow, direction)
                 Notify("Исправлено: " SubStr(converted, 1, 60) (StrLen(converted) > 60 ? "..." : ""), title, "Iconi", true)
             }
         }
@@ -2017,21 +2262,22 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
         Notify("Ошибка конвертации: " err.Message, title, "Iconx")
     }
 
-    if clipboardSaved {
-        try {
-            A_Clipboard := oldClipboard
-        }
-    }
-
-    FinishLiveOperation(replacementCompleted, targetWindow)
+    FinishLiveOperation(
+        replacementCompleted,
+        targetWindow,
+        inputLanguageSwitched ? direction : ""
+    )
     return replacementCompleted
 }
 
 
-FinishLiveOperation(replacementApplied, targetWindow) {
+FinishLiveOperation(replacementApplied, targetWindow, pendingDirection := "") {
+    global g_LiveOperationFocus, g_LivePendingBackspaces
+    global g_LivePendingKeyText
     global g_LiveBusy
     global g_LiveContextInvalidated, g_LiveOperationWindow
     global g_LastWindow
+    global g_LivePendingDirection
 
     ; Сливаем pending и только затем открываем обычную ветку InputHook.
     ; Иначе символ на границе мог попасть в g_Buffer, а Flush — затереть его.
@@ -2044,11 +2290,18 @@ FinishLiveOperation(replacementApplied, targetWindow) {
         currentWindow := WinExist("A")
         contextInvalidated := g_LiveContextInvalidated || currentWindow != targetWindow
         g_LastWindow := currentWindow
-        FlushLivePendingAfterOperation(replacementApplied, contextInvalidated)
+        FlushLivePendingAfterOperation(replacementApplied, contextInvalidated, pendingDirection)
+    } catch {
+        PreserveLivePending()
     } finally {
         g_LiveContextInvalidated := false
         g_LiveOperationWindow := 0
+        g_LivePendingDirection := ""
+        g_LivePendingKeyText := ""
+        g_LiveOperationFocus := 0
+        g_LivePendingBackspaces := 0
         g_LiveBusy := false
+        SetLiveInputBuffering(false)
         Critical "Off"
     }
 }
@@ -2080,6 +2333,36 @@ RecalculateBufferState() {
     global g_Buffer, g_Direction
     global g_PendingBoundary, g_AfterBoundarySpace, g_BoundaryStart
     global g_LiveBoundarySourcePrefix, g_LiveBoundaryReplacementPrefix
+
+    ; A paragraph boundary must work even when input arrives as text packets.
+    lastBreak := 0
+    for ch in StrSplit(g_Buffer) {
+        if (ch = "`n" || ch = "`r" || ch = "`t")
+            lastBreak := A_Index
+    }
+    if lastBreak {
+        g_Buffer := SubStr(g_Buffer, lastBreak + 1)
+        ClearLiveBoundaryPrefix()
+    }
+
+    ; Keep only the most recent run of tokens using one alphabet. Punctuation
+    ; before the first letter belongs to its token (for example [kt,).
+    scanPos := StrLen(g_LiveBoundarySourcePrefix) + 1
+    runStart := scanPos
+    runDirection := ""
+    while RegExMatch(g_Buffer, "\S+", &tokenMatch, scanPos) {
+        tokenDirection := DetectDirectionFromText(tokenMatch[0])
+        if (tokenDirection != "") {
+            if (runDirection != "" && runDirection != tokenDirection)
+                runStart := tokenMatch.Pos
+            runDirection := tokenDirection
+        }
+        scanPos := tokenMatch.Pos + tokenMatch.Len
+    }
+    if (runStart > StrLen(g_LiveBoundarySourcePrefix) + 1) {
+        g_Buffer := SubStr(g_Buffer, runStart)
+        ClearLiveBoundaryPrefix()
+    }
 
     prefixLength := StrLen(g_LiveBoundarySourcePrefix)
 

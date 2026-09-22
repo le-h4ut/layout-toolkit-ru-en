@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Layout Toolkit — краткая справка</title>
+  <link rel="stylesheet" href="welcome.css">
+  <script src="welcome.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark" aria-hidden="true">LT</div>
+      <div><span class="eyebrow">БЫСТРЫЙ СТАРТ</span><h1>Layout Toolkit</h1><p>Исправление раскладки и ввод символов.</p></div>
+    </header>
+    <div class="grid">
+      <section class="card"><h2>Выделенный текст</h2><p>Выделите текст и нажмите:</p><div class="keys"><span><kbd id="layout-full">—</kbd> полностью</span><span><kbd id="layout-majority">—</kbd> по большинству</span></div></section>
+      <section class="card"><h2>Live-режим</h2><p>Способ запуска выбирается в настройках.</p><div class="keys"><span>Двойной пробел или <kbd id="live-convert">—</kbd></span><span><kbd id="live-toggle">—</kbd> включить / выключить</span></div></section>
+      <section class="card"><h2>Unicode Input</h2><p><kbd id="unicode">—</kbd> → введите HEX-код.</p><p>Например, 2014 → —</p></section>
+      <section class="card"><h2>Регистр</h2><p><kbd id="caps-full">—</kbd> инвертировать буквы</p><p><kbd id="caps-smart">—</kbd> обычное написание</p></section>
+    </div>
+    <footer>
+      <label class="live"><input id="enable-live" type="checkbox"><span>Включить Live-режим</span></label>
+      <div class="actions"><button id="settings">Настройки</button><button id="close">Закрыть</button><button id="save" class="primary">Начать</button></div>
+    </footer>
+  </main>
+</body>
+</html>

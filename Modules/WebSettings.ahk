@@ -68,52 +68,138 @@ class LTWebSettings {
     static Busy := false
     static Capture := 0
     static CaptureFocusTimer := 0
+    static LoadingWindow := 0
+    static Initializing := false
+    static Requested := false
+    static Ready := false
+    static LoadGeneration := 0
     static Url := "https://layout-toolkit.invalid/index.html"
 
     static Open() {
-        if this.Window {
-            theme := this.LoadTheme()
-            this.Window.BackColor := theme = "Dark" ? "101619" : "F5F7FA"
-            LTApplyWindowTheme(this.Window.Hwnd, theme)
-            this.Window.Show()
-            this.Send(Map("type", "state", "state", this.State()))
+        this.Requested := true
+        if this.Ready {
+            this.ShowReady()
             return
         }
+        if this.Window || this.Initializing {
+            if this.LoadingWindow
+                this.LoadingWindow.Show()
+            return
+        }
+        this.ShowLoading()
+        this.Initializing := true
+        try this.CreateHidden()
+        catch as err {
+            this.OpenFallback(err.Message)
+        } finally {
+            this.Initializing := false
+        }
+    }
+
+    static ShowLoading() {
+        if this.LoadingWindow
+            return
+        theme := this.LoadTheme()
+        this.LoadingWindow := Gui("+AlwaysOnTop -Resize -MinimizeBox -MaximizeBox", "Layout Toolkit")
+        this.LoadingWindow.BackColor := theme = "Dark" ? "101619" : "F5F7FA"
+        this.LoadingWindow.SetFont("s10 " (theme = "Dark" ? "cE6EDEF" : "c203035"), "Segoe UI")
+        this.LoadingWindow.AddText("x20 y22 w240 h25", "Загрузка настроек…")
+        this.LoadingWindow.OnEvent("Close", (*) => this.CancelLoading())
+        LTApplyWindowTheme(this.LoadingWindow.Hwnd, theme)
+        this.LoadingWindow.Show("w280 h72")
+    }
+
+    static CancelLoading() {
+        this.Requested := false
+        if this.LoadingWindow
+            this.LoadingWindow.Hide()
+        if !this.Initializing
+            this.Dispose()
+    }
+
+    static CreateHidden() {
         this.Window := Gui("+Resize +MinSize720x480", "Layout Toolkit — Настройки")
         this.Window.BackColor := this.LoadTheme() = "Dark" ? "101619" : "F5F7FA"
-        this.Window.OnEvent("Close", (*) => this.Hide())
+        this.Window.OnEvent("Close", (*) => this.Dispose())
         this.Window.OnEvent("Size", (*) => this.Resize())
         LTApplyWindowTheme(this.Window.Hwnd, this.LoadTheme())
-        this.Window.Show("w800 h540")
-        try {
-            assets := A_ScriptDir "\Assets\WebSettings"
-            for name in ["index.html", "settings.css", "settings.js"]
-                if !FileExist(assets "\" name)
-                    throw Error("Не найден файл веб-интерфейса: " assets "\" name)
-            profile := EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2"
-            this.Controller := WebView2.CreateControllerAsync(this.Window.Hwnd, 0, profile).await2(15000)
-            this.Core := this.Controller.CoreWebView2
-            this.Core.SetVirtualHostNameToFolderMapping("layout-toolkit.invalid", assets, 0)
-            settings := this.Core.Settings
-            settings.AreHostObjectsAllowed := false
-            settings.AreDefaultContextMenusEnabled := false
-            settings.AreDevToolsEnabled := false
-            settings.IsStatusBarEnabled := false
-            settings.AreBrowserAcceleratorKeysEnabled := false
-            settings.AreDefaultScriptDialogsEnabled := false
-            try this.Core.Profile.PreferredColorScheme := 1
-            this.Events := [
-                this.Core.WebMessageReceived(ObjBindMethod(this, "Receive")),
-                this.Core.NavigationStarting((sender, args) => args.Cancel := !(args.Uri == this.Url)),
-                this.Core.NewWindowRequested((sender, args) => args.Handled := true),
-                this.Core.PermissionRequested((sender, args) => args.State := 2)
-            ]
-            this.Core.Navigate(this.Url)
-        } catch as err {
+        this.Window.Show("Hide w800 h540")
+        assets := A_ScriptDir "\Assets\WebSettings"
+        for name in ["index.html", "settings.css", "settings.js"]
+            if !FileExist(assets "\" name)
+                throw Error("Не найден файл веб-интерфейса: " assets "\" name)
+        profile := EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2"
+        this.Controller := WebView2.CreateControllerAsync(this.Window.Hwnd, 0, profile).await2(15000)
+        if !this.Requested {
             this.Dispose()
-            OpenNativeSettingsGui()
-            MsgBox("Веб-настройки недоступны. Открыто стандартное окно.`n`nДля веб-интерфейса нужен Microsoft Edge WebView2 Runtime.`n`n" err.Message, "Layout Toolkit", "Icon!")
+            return
         }
+        this.Core := this.Controller.CoreWebView2
+        this.Core.SetVirtualHostNameToFolderMapping("layout-toolkit.invalid", assets, 0)
+        settings := this.Core.Settings
+        settings.AreHostObjectsAllowed := false
+        settings.AreDefaultContextMenusEnabled := false
+        settings.AreDevToolsEnabled := false
+        settings.IsStatusBarEnabled := false
+        settings.AreBrowserAcceleratorKeysEnabled := false
+        settings.AreDefaultScriptDialogsEnabled := false
+        try this.Core.Profile.PreferredColorScheme := 1
+        this.Events := [
+            this.Core.WebMessageReceived(ObjBindMethod(this, "Receive")),
+            this.Core.NavigationStarting((sender, args) => args.Cancel := !(args.Uri == this.Url)),
+            this.Core.NavigationCompleted(ObjBindMethod(this, "NavigationCompleted")),
+            this.Core.NewWindowRequested((sender, args) => args.Handled := true),
+            this.Core.PermissionRequested((sender, args) => args.State := 2)
+        ]
+        generation := ++this.LoadGeneration
+        this.Core.Navigate(this.Url)
+        SetTimer(ObjBindMethod(this, "CheckLoadTimeout", generation), -10000)
+    }
+
+    static NavigationCompleted(sender, args) {
+        if !args.IsSuccess {
+            reason := "Не удалось загрузить интерфейс (код " args.WebErrorStatus ")"
+            generation := this.LoadGeneration
+            SetTimer((*) => this.OpenFallback(reason, generation), -1)
+        }
+    }
+
+    static CheckLoadTimeout(generation) {
+        if generation = this.LoadGeneration && this.Window && !this.Ready
+            this.OpenFallback("Интерфейс не ответил за 10 секунд", generation)
+    }
+
+    static ShowReady() {
+        if !this.Requested || !this.Ready || !this.Window || !this.Controller
+            return
+        theme := this.LoadTheme()
+        this.Window.BackColor := theme = "Dark" ? "101619" : "F5F7FA"
+        LTApplyWindowTheme(this.Window.Hwnd, theme)
+        this.Window.Show()
+        this.Controller.Fill()
+        this.Controller.IsVisible := true
+        this.Controller.MoveFocus(0)
+        this.Send(Map("type", "state", "state", this.State()))
+        this.CloseLoading()
+    }
+
+    static CloseLoading() {
+        window := this.LoadingWindow
+        this.LoadingWindow := 0
+        if window
+            try window.Destroy()
+    }
+
+    static OpenFallback(reason, generation := 0) {
+        if generation && generation != this.LoadGeneration
+            return
+        if !this.Requested {
+            this.Dispose()
+            return
+        }
+        this.Dispose()
+        OpenNativeSettingsGui()
+        MsgBox("Веб-настройки недоступны. Открыто стандартное окно.`n`nДля веб-интерфейса нужен Microsoft Edge WebView2 Runtime.`n`n" reason, "Layout Toolkit", "Icon!")
     }
 
     static Resize() {
@@ -122,22 +208,28 @@ class LTWebSettings {
     }
 
     static Hide() {
-        if this.Capture
-            this.Capture.Stop()
-        if this.Window
-            this.Window.Hide()
+        this.Dispose()
     }
 
     static Dispose(*) {
+        this.Requested := false
+        this.Ready := false
+        this.LoadGeneration += 1
+        if this.CaptureFocusTimer
+            SetTimer(this.CaptureFocusTimer, 0)
+        this.CaptureFocusTimer := 0
         if this.Capture
             this.Capture.Stop()
+        this.Capture := 0
+        this.Busy := false
         this.Events := []
         if this.Controller
             try this.Controller.Close()
         this.Core := this.Controller := 0
         if this.Window
-            this.Window.Destroy()
+            try this.Window.Destroy()
         this.Window := 0
+        this.CloseLoading()
     }
 
     static Send(message) {
@@ -153,7 +245,14 @@ class LTWebSettings {
             if StrLen(raw) > 262144
                 throw Error("Сообщение слишком большое")
             message := JSON.parse(raw)
-            if !(message is Map) || !message.Has("command") || !message.Has("id")
+            if !(message is Map) || !message.Has("command")
+                return
+            if message["command"] = "uiReady" {
+                this.Ready := true
+                SetTimer((*) => this.ShowReady(), -1)
+                return
+            }
+            if !message.Has("id")
                 return
             ; Leave the COM event before starting InputHook or showing a dialog.
             SetTimer((*) => this.Dispatch(message), -1)
@@ -189,7 +288,7 @@ class LTWebSettings {
     }
 
     static State() {
-        global g_ConfigDir, g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint
+        global g_ConfigDir, g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
         global g_ShowTrayTips, g_PlaySound, g_ExcludeWords, g_ExcludePath
         hotkeys := []
         values := SettingsGui_GetCurrentHotkeyValues()
@@ -200,7 +299,7 @@ class LTWebSettings {
         }
         return Map(
             "version", SettingsGui_GetVersionFromChangelog(), "dataDir", g_ConfigDir, "theme", this.LoadTheme(),
-            "live", Map("enabled", g_LiveEnabled, "trigger", g_LiveTriggerMode, "interval", g_DoubleSpaceMs, "hint", g_ShowFirstToggleHint),
+            "live", Map("enabled", g_LiveEnabled, "trigger", g_LiveTriggerMode, "interval", g_DoubleSpaceMs, "switchInputLanguage", g_LiveSwitchInputLanguage, "hint", g_ShowFirstToggleHint),
             "notifications", g_ShowTrayTips, "sound", g_PlaySound, "hotkeys", hotkeys,
             "unicode", Map("confirm", UnicodeInput_LoadConfirmSelectionWithEnter(), "moveHistory", UnicodeInput_LoadMoveHistoryOnUse(), "history", UnicodeInput_LoadHistoryShortcutModifier(), "favorite", UnicodeInput_LoadFavoriteShortcutModifier()),
             "excludeCount", g_ExcludeWords.Count, "excludePath", g_ExcludePath)
@@ -265,14 +364,15 @@ class LTWebSettings {
         interval := NormalizeLiveDoubleSpaceMs(String(data["interval"]), "")
         if (interval == "")
             throw Error("Интервал должен быть целым числом от 100 до 3000 мс")
-        entries := [["General", "LiveEnabled", this.Bool(data, "enabled")], ["General", "LiveTriggerMode", trigger], ["General", "DoubleSpaceMs", interval], ["General", "ShowFirstToggleHint", this.Bool(data, "hint")]]
+        entries := [["General", "LiveEnabled", this.Bool(data, "enabled")], ["General", "LiveTriggerMode", trigger], ["General", "DoubleSpaceMs", interval], ["General", "LiveSwitchInputLanguage", this.Bool(data, "switchInputLanguage")], ["General", "ShowFirstToggleHint", this.Bool(data, "hint")]]
         this.WriteIni(g_ConfigPath, entries, ObjBindMethod(this, "ApplyLive"), ObjBindMethod(this, "ApplyLive"))
     }
 
     static ApplyLive() {
-        global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint
+        global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
         g_LiveTriggerMode := ReadLiveTriggerMode()
         g_DoubleSpaceMs := ReadLiveDoubleSpaceMs()
+        g_LiveSwitchInputLanguage := IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage", "0") = "1"
         g_ShowFirstToggleHint := IniRead(g_ConfigPath, "General", "ShowFirstToggleHint", "1") = "1"
         if !SetLiveMode(IniRead(g_ConfigPath, "General", "LiveEnabled", "0") = "1", false, false)
             throw Error("Не удалось применить Live-настройки. Проверьте конфликты горячих клавиш.")

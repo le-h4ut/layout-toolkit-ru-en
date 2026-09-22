@@ -1,4 +1,5 @@
 (async () => {
+  const rerun = !!window.__ltBrowserCompletedOnce;
   const $ = s => document.querySelector(s);
   const layoutErrors = [];
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -35,6 +36,11 @@
     assert($("#content").textContent.includes("Win+F12"), "Real hotkey from AHK state");
     for (const [name, title] of Object.entries({ layout: "Раскладка", live: "Live-режим", hotkeys: "Горячие клавиши", unicode: "Unicode", caps: "Регистр", exclude: "Исключения", about: "О программе", general: "Обзор" })) await navigate(name, title);
     await navigate("live", "Live-режим");
+    assert($("#live-switch-language").checked === rerun, rerun ? "Live layout switch persists" : "Live layout switch defaults to off");
+    const liveColumns = document.querySelectorAll(".live-trigger-grid > div");
+    assert(liveColumns.length === 2 && liveColumns[0].getBoundingClientRect().right <= liveColumns[1].getBoundingClientRect().left, "Live controls use two non-overlapping columns");
+    $("#live-switch-language").checked = true;
+    $("#live-switch-language").dispatchEvent(new Event("input", { bubbles: true }));
     input("#live-interval", "99");
     const saveRect = $("#save").getBoundingClientRect();
     assert(saveRect.bottom <= innerHeight && saveRect.right <= innerWidth, "Save stays inside the resized window");
@@ -45,6 +51,7 @@
     $("#save").click();
     await until(() => $("#savebar").hidden && !$("#save").disabled);
     assert($("#live-interval").value === "650", "Saved value returned through native bridge");
+    assert($("#live-switch-language").checked, "Live layout switch persisted through native bridge");
     input("#live-interval", "750");
     $("nav [data-page=unicode]").click();
     await until(() => $("#unsaved").open);
@@ -80,6 +87,7 @@
     }
     firstKey.textContent = originalKey;
     assert(!layoutErrors.length, `Default-size scrolling: ${layoutErrors.join(", ")}`);
+    window.__ltBrowserCompletedOnce = true;
     window.__ltTestResult = { ok: true, message: "All browser tests passed" };
   } catch (error) { window.__ltTestResult = { ok: false, message: error.stack || error.message }; }
 })();

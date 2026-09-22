@@ -25,6 +25,7 @@ g_SettingsLiveDoubleSpaceLabel := ""
 g_SettingsLiveDoubleSpaceEdit := ""
 g_SettingsLiveDoubleSpaceHint := ""
 g_SettingsLiveHintChk := ""
+g_SettingsLiveSwitchLanguageChk := ""
 
 g_SettingsUnicodeConfirmChk := ""
 g_SettingsUnicodeMoveHistoryChk := ""
@@ -46,7 +47,7 @@ OpenNativeSettingsGui(*) {
     global g_SettingsGui, g_SettingsContentTitle, g_SettingsContentBody
     global g_SettingsActionBtn1, g_SettingsActionBtn2, g_SettingsActionBtn3
     global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceLabel, g_SettingsLiveDoubleSpaceEdit
-    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk
+    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
     global g_SettingsUnicodeConfirmChk, g_SettingsUnicodeMoveHistoryChk
     global g_SettingsUnicodeHistoryModifierDDL, g_SettingsUnicodeFavoriteModifierDDL
@@ -103,15 +104,16 @@ OpenNativeSettingsGui(*) {
     g_SettingsContentBody := g_SettingsGui.AddEdit("x180 y48 w560 h340 ReadOnly +Wrap VScroll", "")
     g_SettingsContentBody.SetFont("s9", "Segoe UI")
 
-    g_SettingsLiveEnabledChk := g_SettingsGui.AddCheckbox("x180 y268 w520 h24 Hidden", "Включить Live-режим")
-    g_SettingsLiveSpaceRadio := g_SettingsGui.AddRadio("x180 y296 w520 h24 Hidden Group", "Запускать двойным пробелом")
-    g_SettingsLiveHotkeyRadio := g_SettingsGui.AddRadio("x180 y324 w520 h24 Hidden", "Запускать горячей клавишей")
+    g_SettingsLiveEnabledChk := g_SettingsGui.AddCheckbox("x180 y256 w520 h24 Hidden", "Включить Live-режим")
+    g_SettingsLiveSpaceRadio := g_SettingsGui.AddRadio("x180 y284 w520 h24 Hidden Group", "Запускать двойным пробелом")
+    g_SettingsLiveHotkeyRadio := g_SettingsGui.AddRadio("x180 y312 w520 h24 Hidden", "Запускать горячей клавишей")
     g_SettingsLiveSpaceRadio.OnEvent("Click", SettingsGui_LiveTriggerChanged)
     g_SettingsLiveHotkeyRadio.OnEvent("Click", SettingsGui_LiveTriggerChanged)
-    g_SettingsLiveDoubleSpaceLabel := g_SettingsGui.AddText("x180 y356 w210 h23 Hidden", "Интервал между пробелами:")
-    g_SettingsLiveDoubleSpaceEdit := g_SettingsGui.AddEdit("x395 y352 w90 h24 Number Hidden", "")
-    g_SettingsLiveDoubleSpaceHint := g_SettingsGui.AddText("x495 y356 w190 h23 Hidden", "100–3000 мс")
-    g_SettingsLiveHintChk := g_SettingsGui.AddCheckbox("x180 y382 w540 h24 Hidden", "Показывать подробную подсказку при первом включении Live-режима")
+    g_SettingsLiveDoubleSpaceLabel := g_SettingsGui.AddText("x180 y344 w210 h23 Hidden", "Интервал между пробелами:")
+    g_SettingsLiveDoubleSpaceEdit := g_SettingsGui.AddEdit("x395 y340 w90 h24 Number Hidden", "")
+    g_SettingsLiveDoubleSpaceHint := g_SettingsGui.AddText("x495 y344 w190 h23 Hidden", "100–3000 мс")
+    g_SettingsLiveHintChk := g_SettingsGui.AddCheckbox("x180 y370 w540 h24 Hidden", "Показывать подробную подсказку при первом включении Live-режима")
+    g_SettingsLiveSwitchLanguageChk := g_SettingsGui.AddCheckbox("x180 y396 w540 h24 Hidden", "Переключать раскладку после успешного исправления")
 
     g_SettingsUnicodeConfirmChk := g_SettingsGui.AddCheckbox("x180 y260 w540 h24 Hidden", "Подтверждать быстрый выбор клавишей Enter")
     g_SettingsUnicodeMoveHistoryChk := g_SettingsGui.AddCheckbox("x180 y290 w540 h24 Hidden", "Поднимать использованный символ в начало истории")
@@ -343,7 +345,7 @@ SettingsGui_GetLayoutFixText() {
 
 SettingsGui_GetLiveText() {
     global g_LiveEnabled, g_LiveTriggerMode, g_HotkeyLiveToggle, g_HotkeyLiveConvert
-    global g_DoubleSpaceMs, g_ShowFirstToggleHint
+    global g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
 
     text := ""
     text .= "Live-режим сейчас: " SettingsGui_OnOff(g_LiveEnabled) "`r`n"
@@ -355,6 +357,7 @@ SettingsGui_GetLiveText() {
     text .= "Это альтернативные способы запуска: одновременно действует только выбранный вариант.`r`n"
     text .= "`r`n"
     text .= "Подсказка при первом включении: " SettingsGui_OnOff(g_ShowFirstToggleHint) "`r`n"
+    text .= "Автопереключение раскладки: " SettingsGui_OnOff(g_LiveSwitchInputLanguage) "`r`n"
     text .= "`r`n"
     text .= "Live-режим рассчитан на короткие фрагменты во время набора. Для больших выделений используйте Layout Fix.`r`n"
 
@@ -381,7 +384,7 @@ SettingsGui_ApplyPageLayout(pageName) {
 
 SettingsGui_SetLiveControlsVisible(visible) {
     global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceLabel, g_SettingsLiveDoubleSpaceEdit
-    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk
+    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
 
     controls := [
@@ -391,7 +394,8 @@ SettingsGui_SetLiveControlsVisible(visible) {
         g_SettingsLiveDoubleSpaceLabel,
         g_SettingsLiveDoubleSpaceEdit,
         g_SettingsLiveDoubleSpaceHint,
-        g_SettingsLiveHintChk
+        g_SettingsLiveHintChk,
+        g_SettingsLiveSwitchLanguageChk
     ]
 
     for _, ctrl in controls {
@@ -427,9 +431,9 @@ SettingsGui_UpdateLiveTriggerControlVisibility() {
 
 
 SettingsGui_UpdateLiveControls() {
-    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk
+    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
-    global g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint
+    global g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
     global g_HotkeyLiveConvert
 
     if IsObject(g_SettingsLiveEnabledChk) {
@@ -453,19 +457,24 @@ SettingsGui_UpdateLiveControls() {
         g_SettingsLiveHintChk.Value := g_ShowFirstToggleHint ? 1 : 0
     }
 
+    if IsObject(g_SettingsLiveSwitchLanguageChk) {
+        g_SettingsLiveSwitchLanguageChk.Value := g_LiveSwitchInputLanguage ? 1 : 0
+    }
+
     SettingsGui_UpdateLiveTriggerControlVisibility()
 }
 
 
 SettingsGui_SaveLiveSettings() {
-    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk
+    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
-    global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint, g_AppName
+    global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint, g_AppName
     global g_LiveBusy
 
     if (!IsObject(g_SettingsLiveEnabledChk)
      || !IsObject(g_SettingsLiveDoubleSpaceEdit)
      || !IsObject(g_SettingsLiveHintChk)
+     || !IsObject(g_SettingsLiveSwitchLanguageChk)
      || !IsObject(g_SettingsLiveSpaceRadio)
      || !IsObject(g_SettingsLiveHotkeyRadio)) {
         return
@@ -491,17 +500,22 @@ SettingsGui_SaveLiveSettings() {
     }
 
     oldTriggerMode := g_LiveTriggerMode
+    oldSwitchInputLanguage := g_LiveSwitchInputLanguage
     g_LiveTriggerMode := newTriggerMode
     g_DoubleSpaceMs := newDoubleSpaceMs
+    g_LiveSwitchInputLanguage := g_SettingsLiveSwitchLanguageChk.Value = 1
     g_ShowFirstToggleHint := g_SettingsLiveHintChk.Value = 1
 
     IniWrite(g_LiveTriggerMode, g_ConfigPath, "General", "LiveTriggerMode")
     IniWrite(String(g_DoubleSpaceMs), g_ConfigPath, "General", "DoubleSpaceMs")
+    IniWrite(g_LiveSwitchInputLanguage ? "1" : "0", g_ConfigPath, "General", "LiveSwitchInputLanguage")
     IniWrite(g_ShowFirstToggleHint ? "1" : "0", g_ConfigPath, "General", "ShowFirstToggleHint")
 
     if !SetLiveMode(g_SettingsLiveEnabledChk.Value = 1, false, true) {
         g_LiveTriggerMode := oldTriggerMode
+        g_LiveSwitchInputLanguage := oldSwitchInputLanguage
         IniWrite(g_LiveTriggerMode, g_ConfigPath, "General", "LiveTriggerMode")
+        IniWrite(g_LiveSwitchInputLanguage ? "1" : "0", g_ConfigPath, "General", "LiveSwitchInputLanguage")
         UpdateLiveConvertHotkeyRegistration()
         SettingsGui_UpdateLiveControls()
         return

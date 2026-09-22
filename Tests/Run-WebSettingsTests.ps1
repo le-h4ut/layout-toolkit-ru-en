@@ -2,8 +2,10 @@ param(
     [string]$AutoHotkeyPath = 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe',
     [switch]$Preview,
     [switch]$BrowserTests,
+    [switch]$SettingsLifecycleTests,
     [switch]$UnicodePreview,
     [switch]$UnicodeBrowserTests,
+    [switch]$WelcomeBrowserTests,
     [switch]$PrewarmTests
 )
 $ErrorActionPreference = 'Stop'
@@ -26,7 +28,7 @@ $source = $source -creplace '\bHotkey\(', 'WebTest_NoOp('
 $source = $source -replace '(?m)^global g_ShowTrayTips := .*$', 'global g_ShowTrayTips := false'
 $source = $source -replace '(?m)^global g_PlaySound := .*$', 'global g_PlaySound := false'
 $source = $source.Replace('ShowTrainingGui(true)', 'WebTest_NoOp()')
-$entry = if ($Preview) { 'LTWebSettings.Open()' } elseif ($BrowserTests) { 'LTWebSettings.Open(), SetTimer(WebTest_BrowserRun, -100)' } elseif ($UnicodePreview) { 'WebTest_StartUnicodePreview()' } elseif ($UnicodeBrowserTests) { 'WebTest_StartUnicodeBrowser()' } elseif ($PrewarmTests) { 'WebTest_StartPrewarmTimer()' } else { 'WebTest_Run()' }
+$entry = if ($Preview) { 'LTWebSettings.Open()' } elseif ($BrowserTests) { 'LTWebSettings.Open(), SetTimer(WebTest_BrowserRun, -100)' } elseif ($SettingsLifecycleTests) { 'WebTest_StartSettingsLifecycle()' } elseif ($UnicodePreview) { 'WebTest_StartUnicodePreview()' } elseif ($UnicodeBrowserTests) { 'WebTest_StartUnicodeBrowser()' } elseif ($WelcomeBrowserTests) { 'WebTest_StartWelcomeBrowser()' } elseif ($PrewarmTests) { 'WebTest_StartPrewarmTimer()' } else { 'WebTest_Run()' }
 $source = $source -replace '(?m)^RegisterHotkeys\(\)\r?$', $entry
 $source += "`nWebTest_NoOp(*) {`n}`n"
 $source += "`n" + (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'WebSettings.Tests.ahk'))
@@ -41,6 +43,10 @@ $unicodeWeb = Get-Content -Raw -LiteralPath $unicodeWebPath
 $unicodeWeb = $unicodeWeb.Replace('EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2\UnicodeInput"', 'A_ScriptDir "\WebView2UnicodeProfile"')
 $unicodeWeb = $unicodeWeb.Replace('UnicodeInput_ApplyResult(text, mode)', 'WebTest_UnicodeApplyResult(text, mode)')
 [IO.File]::WriteAllText($unicodeWebPath, $unicodeWeb, [Text.UTF8Encoding]::new($true))
+$welcomeWebPath = Join-Path $testDir 'Modules\WebWelcome.ahk'
+$welcomeWeb = Get-Content -Raw -LiteralPath $welcomeWebPath
+$welcomeWeb = $welcomeWeb.Replace('EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2\Welcome"', 'A_ScriptDir "\WebView2WelcomeProfile"')
+[IO.File]::WriteAllText($welcomeWebPath, $welcomeWeb, [Text.UTF8Encoding]::new($true))
 if ($UnicodeBrowserTests) {
     # Force the page handshake to arrive later than Open(), reproducing the
     # startup race that used to expose an empty WebView container.

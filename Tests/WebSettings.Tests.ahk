@@ -4,10 +4,123 @@ WebTest_Assert(condition, label) {
         throw Error("FAIL: " label)
 }
 
+WebTest_StartSettingsLifecycle() {
+    global g_WebTestSawLoading := false
+    global g_WebTestSettingsPhase := 1
+    global g_WebTestSettingsDeadline := A_TickCount + 15000
+    global g_WebTestFirstSettingsWindow := 0
+    SetTimer(WebTest_ObserveSettingsLoading, 10)
+    LTWebSettings.Open()
+    SetTimer(WebTest_SettingsLifecycleRun, -100)
+}
+
+WebTest_ObserveSettingsLoading() {
+    global g_WebTestSawLoading
+    if LTWebSettings.LoadingWindow && DllCall("IsWindowVisible", "Ptr", LTWebSettings.LoadingWindow.Hwnd, "Int") {
+        g_WebTestSawLoading := true
+        if !LTWebSettings.Ready && LTWebSettings.Window && DllCall("IsWindowVisible", "Ptr", LTWebSettings.Window.Hwnd, "Int")
+            throw Error("Settings window became visible before the UI was ready")
+    }
+}
+
+WebTest_SettingsLifecycleRun() {
+    global g_WebTestSawLoading, g_WebTestSettingsPhase, g_WebTestSettingsDeadline, g_WebTestFirstSettingsWindow
+    try {
+        if !LTWebSettings.Ready || LTWebSettings.LoadingWindow {
+            if A_TickCount > g_WebTestSettingsDeadline
+                throw Error("Settings did not finish loading in phase " g_WebTestSettingsPhase)
+            SetTimer(WebTest_SettingsLifecycleRun, -100)
+            return
+        }
+        WebTest_Assert(DllCall("IsWindowVisible", "Ptr", LTWebSettings.Window.Hwnd, "Int"), "ready settings window is visible")
+        WebTest_Assert(LTWebSettings.Controller.IsVisible, "hidden WebView controller becomes visible")
+        if g_WebTestSettingsPhase = 1 {
+            WebTest_Assert(g_WebTestSawLoading, "loading window was visible")
+            g_WebTestFirstSettingsWindow := LTWebSettings.Window.Hwnd
+            WinClose("ahk_id " g_WebTestFirstSettingsWindow)
+            Sleep(100)
+            WebTest_Assert(!LTWebSettings.Window && !LTWebSettings.Controller && !LTWebSettings.Core, "close releases WebView and HWND")
+            g_WebTestSettingsPhase := 2
+            g_WebTestSettingsDeadline := A_TickCount + 15000
+            LTWebSettings.Open()
+            SetTimer(WebTest_SettingsLifecycleRun, -100)
+            return
+        }
+        WebTest_Assert(LTWebSettings.Window.Hwnd != g_WebTestFirstSettingsWindow, "reopen uses a new HWND")
+        LTWebSettings.Dispose()
+        LTWebSettings.Requested := true
+        LTWebSettings.ShowLoading()
+        WinClose("ahk_id " LTWebSettings.LoadingWindow.Hwnd)
+        Sleep(100)
+        WebTest_Assert(!LTWebSettings.Requested && !LTWebSettings.LoadingWindow, "loading can be cancelled")
+        FileAppend("PASS: loading window, ready-only reveal, close, fresh reopen and loading cancellation`n", "*", "UTF-8")
+        ExitApp(0)
+    } catch as err {
+        FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")
+        LTWebSettings.Dispose()
+        ExitApp(1)
+    }
+}
+
+WebTest_StartWelcomeBrowser() {
+    LTWebWelcome.Open(true)
+    SetTimer(WebTest_WelcomeBrowserRun, -100)
+}
+
+WebTest_WelcomeBrowserRun() {
+    global g_ConfigPath
+    try {
+        deadline := A_TickCount + 20000
+        while !LTWebWelcome.Ready {
+            if A_TickCount > deadline
+                throw Error("Welcome page did not become ready: " LTWebWelcome.LastError)
+            Sleep(100)
+        }
+        core := LTWebWelcome.Core
+        deadline := A_TickCount + 10000
+        loop {
+            value := core.ExecuteScriptAsync("document.querySelector('#layout-full').textContent !== '—'").await2(3000)
+            if value = "true"
+                break
+            if A_TickCount > deadline
+                throw Error("Welcome state did not render")
+            Sleep(100)
+        }
+        rawMetrics := core.ExecuteScriptAsync("({scroll:document.documentElement.scrollHeight>innerHeight,columns:getComputedStyle(document.querySelector('.grid')).gridTemplateColumns,firstRun:document.querySelector('#save').textContent,checked:document.querySelector('#enable-live').checked})").await2(3000)
+        metrics := JSON.parse(rawMetrics)
+        WebTest_Assert(!metrics["scroll"], "welcome fits without scrolling")
+        WebTest_Assert(metrics["firstRun"] = "Начать", "first-run action label")
+        stream := WebView2.CreateFileStream(A_ScriptDir "\welcome.png", "w")
+        core.CapturePreviewAsync(0, stream).await2(5000)
+        stream := 0
+        LTWebWelcome.Dispatch(Map("command", "close"))
+        WebTest_Assert(IniRead(g_ConfigPath, "General", "FirstRunDone", "0") = "0", "closing first run leaves it pending")
+        LTWebSettings.SaveTheme(Map("theme", "Dark"))
+        LTWebWelcome.Open(false)
+        Sleep(150)
+        WebTest_Assert(core.ExecuteScriptAsync("document.querySelector('#save').textContent").await2(3000) = '"Сохранить"', "tray action label")
+        WebTest_Assert(core.ExecuteScriptAsync("document.documentElement.dataset.theme").await2(3000) = '"dark"', "welcome follows saved dark theme")
+        LTWebWelcome.Window.Show("w650 h440")
+        Sleep(100)
+        WebTest_Assert(core.ExecuteScriptAsync("document.documentElement.scrollHeight > innerHeight").await2(3000) = "false", "minimum window height needs no scrolling")
+        stream := WebView2.CreateFileStream(A_ScriptDir "\welcome-dark.png", "w")
+        core.CapturePreviewAsync(0, stream).await2(5000)
+        stream := 0
+        LTWebWelcome.Dispose()
+        FileAppend("PASS: welcome WebView2, compact layout, first-run close and tray reopen`n", "*", "UTF-8")
+        ExitApp(0)
+    } catch as err {
+        FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")
+        LTWebWelcome.Dispose()
+        ExitApp(1)
+    }
+}
+
 WebTest_Run() {
-    global g_ConfigPath, g_HotkeysPath, g_HotkeyLayoutFull, g_HotkeyLiveConvert
+    global g_ConfigPath, g_HotkeysPath, g_HotkeyLayoutFull, g_HotkeyLiveConvert, g_RegisteredLiveConvertHotkey
     try {
         state := LTWebSettings.State()
+        WebTest_Assert(state["version"] = "v1.5.0-beta.1", "Unreleased changelog section does not replace the installed version")
         WebTest_Assert(state["hotkeys"].Length = 7, "seven hotkey actions")
         WebTest_Assert(InStr(state["dataDir"], "UserData"), "isolated profile")
         frame := Gui()
@@ -16,6 +129,7 @@ WebTest_Run() {
         WebTest_Assert(LTApplyWindowTheme(frame.Hwnd, "Light"), "native DWM light frame restored")
         frame.Destroy()
         WebTest_Assert(state["theme"] = "Light", "light theme defaults safely")
+        WebTest_Assert(!state["live"]["switchInputLanguage"], "missing Live layout switch setting defaults to off")
         result := LTWebSettings.SaveTheme(Map("theme", "Dark"))
         WebTest_Assert(result["theme"] = "Dark" && LTWebSettings.State()["theme"] = "Dark", "dark theme persisted")
         rejected := false
@@ -24,10 +138,13 @@ WebTest_Run() {
             rejected := true
         WebTest_Assert(rejected && LTWebSettings.State()["theme"] = "Dark", "invalid theme rejected")
         LTWebSettings.SaveTheme(Map("theme", "Light"))
-        data := JSON.parse('{"enabled":false,"trigger":"Hotkey","interval":550,"hint":true}')
+        data := JSON.parse('{"enabled":true,"trigger":"Hotkey","interval":550,"switchInputLanguage":true,"hint":true}')
         LTWebSettings.SaveLive(data)
         WebTest_Assert(IniRead(g_ConfigPath, "General", "DoubleSpaceMs") = 550, "live interval saved")
+        WebTest_Assert(IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage") = 1, "Live layout switch saved")
+        WebTest_Assert(LTWebSettings.State()["live"]["switchInputLanguage"], "Live layout switch applied at runtime")
         WebTest_Assert(LTWebSettings.State()["live"]["trigger"] = "Hotkey", "runtime live mode updated")
+        WebTest_Assert(g_RegisteredLiveConvertHotkey = g_HotkeyLiveConvert, "Live hotkey registered in Hotkey trigger mode")
         before := FileRead(g_ConfigPath)
         data["interval"] := 99
         rejected := false
@@ -63,7 +180,18 @@ WebTest_Run() {
         catch
             rejected := true
         WebTest_Assert(rejected && FileRead(g_ConfigPath) == before, "failed apply rolls back INI")
-        FileAppend("PASS: state, JSON booleans, Live, Unicode, hotkeys, validation and INI rollback`n", "*", "UTF-8")
+        welcome := LTWebWelcome.State()
+        WebTest_Assert(welcome["layoutFull"] = HotkeyToDisplay(g_HotkeyLayoutFull), "welcome uses current shortcuts")
+        LTWebWelcome.Window := Gui()
+        LTWebWelcome.FirstRun := true
+        LTWebWelcome.Dispatch(Map("command", "close"))
+        WebTest_Assert(IniRead(g_ConfigPath, "General", "FirstRunDone", "0") = "0", "welcome close keeps first run pending")
+        LTWebWelcome.Window := Gui()
+        LTWebWelcome.FirstRun := true
+        LTWebWelcome.Dispatch(Map("command", "save", "live", false))
+        WebTest_Assert(IniRead(g_ConfigPath, "General", "FirstRunDone", "0") = "1", "welcome save completes first run")
+        LTWebWelcome.Dispose()
+        FileAppend("PASS: state, Live, Unicode, hotkeys, welcome save/close and INI rollback`n", "*", "UTF-8")
         ExitApp(0)
     } catch as err {
         FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")

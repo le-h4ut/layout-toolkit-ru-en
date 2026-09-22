@@ -64,6 +64,16 @@ dialog { max-width:calc(100vw - 40px); padding:20px; }
 #content[data-page=general] .columns .actions { margin-top:5px; }
 #content[data-page=general] .columns .actions button { padding:4px 0; }
 #content[data-page=general] > .card:last-child > p { display:none; }
+#content[data-page=live] > .card:first-child { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
+#content[data-page=live] > .card:first-child .row { padding:0; border:0; }
+#content[data-page=live] .live-trigger-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+#content[data-page=live] .live-trigger-grid .radios { flex-direction:column; align-items:flex-start; gap:5px; }
+#content[data-page=live] .live-trigger-grid .field { margin-top:9px; }
+#content[data-page=live] .live-shortcuts .row { min-height:40px; }
+#content[data-page=live] .live-shortcuts .row:first-child { padding-top:0; }
+#content[data-page=live] .live-shortcuts .row:last-child { border:0; padding-bottom:0; }
+#content[data-page=live] { padding-bottom:4px; }
+#content[data-page=live] > .hint:last-child { margin-bottom:0; }
 #content[data-page=hotkeys] .row { min-height:37px; padding:6px 0; }
 @media(max-width:760px) {
   .sidebar { width:174px; padding-left:7px; padding-right:7px; }
@@ -73,6 +83,8 @@ dialog { max-width:calc(100vw - 40px); padding:20px; }
   .card { padding:10px 12px; }
   .hotkey-controls { max-width:49%; }
   .row { gap:8px; }
+  #content[data-page=live] > .card:first-child { gap:10px; }
+  #content[data-page=live] .live-trigger-grid { gap:10px; }
   #content[data-page=hotkeys] .row { min-height:33px; padding:4px 0; }
 }
 
