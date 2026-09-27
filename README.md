@@ -92,7 +92,7 @@ It does not modify the working installation or the real user profile.
 Open PowerShell and paste this command:
 
 ```powershell
-irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1 | iex
+(irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1).TrimStart([char]0xFEFF) | iex
 ```
 
 The installer asks where to place Layout Toolkit, verifies the release archive and
@@ -106,13 +106,17 @@ Close Toolkit and run the fresh installer once. For a manually extracted copy,
 pass its existing folder explicitly (replace the example path):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1))) -Update -InstallPath 'D:\Scripts\LT My' -NoAutostart
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1).TrimStart([char]0xFEFF))) -Update -InstallPath 'D:\Scripts\LT My' -NoAutostart
 ```
 
 `-NoAutostart` keeps startup disabled; omit it if you want startup enabled.
 Existing managed preferences are retained. After v1.5.1 is installed, subsequent
 updates can use the Settings button. Installer logs are kept in
 `%LocalAppData%\Layout Toolkit\Logs`; UI failures show a persistent error dialog.
+
+The commands strip the leading UTF-8 BOM before evaluating downloaded text.
+Windows PowerShell 5.1 otherwise fails to recognize the installer's parameter
+block. The BOM is retained in the file for correct Cyrillic decoding with `-File`.
 
 ---
 
