@@ -1,6 +1,7 @@
 param(
     [string]$AutoHotkeyPath = 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe',
     [switch]$RealInput,
+    [switch]$SelectedOnly,
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$SourcePath = (Join-Path $RepoRoot 'Layout_Toolkit_RU_EN.ahk')
 )
@@ -15,7 +16,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'CHANGELOG.md') -Destination $testDi
 $source = Get-Content -Raw -LiteralPath $SourcePath
 $source = $source.Replace('A_MyDocuments "\Layout Toolkit"', 'A_ScriptDir "\UserData"')
 $source = $source -replace '(?m)^MigrateUserData\(\)\r?$', '; Migration disabled in the test fixture.'
-$entryFunction = $RealInput ? 'RunLiveInputLanguageIntegrationTests()' : 'RunLiveInputLanguageTests()'
+$entryFunction = $SelectedOnly ? 'RunSelectedInputLanguageIntegrationTests()' : $RealInput ? 'RunLiveInputLanguageIntegrationTests()' : 'RunLiveInputLanguageTests()'
 $source = $source -replace '(?m)^SetupTrayMenu\(\)\r?$', $entryFunction
 $source = $source -replace '(?m)^~[LRM]Button::.*\r?$', ''
 $source = $source -replace '(?m)^\$\*Space::.*\r?$', ''
@@ -28,14 +29,24 @@ $source = $source -replace '(?m)^RegisterHotkeys\(\)\r?$', '; Hotkey registratio
 $source = $source -replace '(?m)^SetTimer\(ObjBindMethod\(LTWebUnicodeInput, "Prewarm"\), -1500\)\r?$', ''
 $source = $source -replace '(?m)^OnExit\(\(\*\) => LTWebUnicodeInput\.Dispose\(\)\)\r?$', ''
 
-if ($RealInput) {
+if ($RealInput -or $SelectedOnly) {
     $source += "`n" + (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'LiveInputLanguage.Integration.ahk'))
 } else {
     # Isolate every side effect used by DoLiveConvertAndReplace while retaining
     # its real transaction, direction detection, target-window guards and cleanup.
     $source = $source.Replace('A_Clipboard', 'g_LiveTestClipboard')
+    $source = $source.Replace('global g_AppName, g_SelectedConversionBusy, g_LiveBusy', 'global g_AppName, g_SelectedConversionBusy, g_LiveBusy, g_LiveTestClipboard')
     $source = $source.Replace('ClipboardAll()', 'LiveTest_ClipboardAll()')
     $source = $source.Replace('ClipWait(', 'LiveTest_ClipWait(')
+    $source = $source.Replace('Send "^c"', 'SelectedTest_Copy()')
+    $source = $source.Replace('Send "^v"', 'SelectedTest_Paste()')
+    $source = $source.Replace('Send "{Blind}{Space}"', 'LiveTest_NoOp()')
+    $source = $source.Replace('Notify("Не удалось вставить исправленный текст: " err.Message, title, "Iconx")', 'SelectedTest_RecordError(err)')
+    foreach ($delay in @(30, 150, 500)) {
+        $source = $source.Replace("Sleep $delay", "LiveTest_NoOp($delay)")
+    }
+    $source = $source.Replace('targetFocus := GetLiveInputTargetHwnd(targetWindow)', 'targetFocus := LiveTest_GetLiveInputTargetHwnd(targetWindow)')
+    $source = $source.Replace('&& GetLiveInputTargetHwnd(targetWindow) = targetFocus', '&& LiveTest_GetLiveInputTargetHwnd(targetWindow) = targetFocus')
     $source = $source.Replace('SendInput sendSequence', 'LiveTest_Send(sendSequence)')
     $source = $source.Replace('SendInput pendingSequence "{Text}" pendingOutput', 'LiveTest_SendPending(pendingOutput)')
     $source = $source.Replace('SetLiveInputBuffering(true)', 'LiveTest_SetInputBuffering(true)')
@@ -54,6 +65,7 @@ if ($RealInput) {
     $source = $source.Replace('return PostLiveInputLanguageRequest(targetWindow, hkl)', 'return LiveTest_PostInputLanguageRequest(targetWindow, hkl)')
     $source = $source.Replace('if !PostLiveInputLanguageRequest(targetWindow, hkl)', 'if !LiveTest_PostInputLanguageRequest(targetWindow, hkl)')
     $source += "`n" + (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'LiveInputLanguage.Tests.ahk'))
+    $source += "`n" + (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'SelectedInputLanguage.Tests.ahk'))
 }
 
 $entryPath = Join-Path $testDir 'LiveInputLanguage.TestRuntime.ahk'
@@ -62,7 +74,8 @@ $entryPath = Join-Path $testDir 'LiveInputLanguage.TestRuntime.ahk'
 $stderr = Join-Path $testDir 'stderr.txt'
 $stdout = Join-Path $testDir 'stdout.txt'
 $process = Start-Process -FilePath $AutoHotkeyPath -ArgumentList @('/ErrorStdOut=UTF-8', ('"' + $entryPath + '"')) -WindowStyle Hidden -RedirectStandardError $stderr -RedirectStandardOutput $stdout -PassThru
-if (!$process.WaitForExit(10000)) {
+$null = $process.Handle
+if (!$process.WaitForExit(45000)) {
     Stop-Process -Id $process.Id
     throw "Tests timed out. Logs: $testDir"
 }

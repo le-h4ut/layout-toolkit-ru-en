@@ -116,11 +116,138 @@ WebTest_WelcomeBrowserRun() {
     }
 }
 
+WebTest_FetchUpdateManifest() {
+    global g_WebTestUpdateFetches, g_WebTestUpdateVersion
+    if !IsSet(g_WebTestUpdateFetches)
+        g_WebTestUpdateFetches := 0
+    g_WebTestUpdateFetches++
+    manifest := JSON.parse(FileRead(A_ScriptDir "\latest.json", "UTF-8"))
+    if IsSet(g_WebTestUpdateVersion) && g_WebTestUpdateVersion != ""
+        manifest["version"] := g_WebTestUpdateVersion
+    return manifest
+}
+
+WebTest_RecordProjectOpen(url) {
+    global g_WebTestProjectOpens
+    if !IsSet(g_WebTestProjectOpens)
+        g_WebTestProjectOpens := []
+    g_WebTestProjectOpens.Push(url)
+}
+
 WebTest_Run() {
     global g_ConfigPath, g_HotkeysPath, g_HotkeyLayoutFull, g_HotkeyLiveConvert, g_RegisteredLiveConvertHotkey
+    global g_SettingsGui, g_UnicodeInputGuiStates
+    global g_SettingsSwitchLanguageChk
+    global g_SettingsActionBtn1, g_SettingsActionBtn2, g_SettingsAction1, g_WebTestProjectOpens := []
+    global g_WebTestUpdateFetches := 0, g_WebTestUpdateVersion := ""
     try {
+        WebTest_Assert(!LTDebugUI_IsNative(), "WebView2 is the default UI")
+        debugModePath := A_ScriptDir "\Assets\DebugUIView.mode"
+        FileAppend("Native`r`n", debugModePath, "UTF-8")
+        WebTest_Assert(LTDebugUI_IsNative(), "PowerShell-style native debug marker is recognized")
+        LTDebugUI_PrewarmUnicode()
+        WebTest_Assert(!LTWebUnicodeInput.Window, "native mode skips Unicode WebView2 prewarm")
+        OpenSettingsGui()
+        WebTest_Assert(IsObject(g_SettingsGui) && !LTWebSettings.Window, "settings route to native GUI")
+        SettingsGui_ShowPage("About")
+        WebTest_Assert(g_SettingsAction1 = "OpenProject" && g_SettingsActionBtn1.Visible, "native About shows GitHub action")
+        WebTest_Assert(g_SettingsActionBtn2.Visible && !g_SettingsActionBtn2.Enabled && InStr(g_SettingsActionBtn2.Text, "Coming soon..."), "native About shows inactive website placeholder")
+        WebTest_Assert(InStr(SettingsGui_GetAboutText(), SettingsGui_GetProjectUrl()), "native About includes project URL")
+        SettingsGui_ActionButton1()
+        LTWebSettings.Action("openProject")
+        WebTest_Assert(g_WebTestProjectOpens.Length = 2, "native and web actions use the shared external opener")
+        for url in g_WebTestProjectOpens
+            WebTest_Assert(url = "https://github.com/le-h4ut/layout-toolkit-ru-en", "project opens the correct GitHub repository")
+        SettingsGui_ShowPage("General")
+        WebTest_Assert(g_SettingsActionBtn2.Enabled, "website placeholder does not disable other pages' actions")
+        SettingsGui_Close()
+        UnicodeInput("clipboard")
+        WebTest_Assert(g_UnicodeInputGuiStates.Count = 1 && !LTWebUnicodeInput.Window, "Unicode route to native GUI")
+        UnicodeInput_CloseAllNative()
+        FileDelete(debugModePath)
+        WebTest_Assert(!LTDebugUI_IsNative(), "removing debug marker restores WebView2")
+        FileAppend("invalid", debugModePath, "UTF-8")
+        WebTest_Assert(!LTDebugUI_IsNative(), "invalid debug marker safely falls back to WebView2")
+        FileDelete(debugModePath)
         state := LTWebSettings.State()
-        WebTest_Assert(state["version"] = "v1.5.0-beta.1", "Unreleased changelog section does not replace the installed version")
+        WebTest_Assert(state["projectUrl"] = SettingsGui_GetProjectUrl(), "web state uses the shared project URL")
+        WebTest_Assert(state["version"] = "v1.5.0", "stable release version is read from the changelog")
+        WebTest_Assert(!state["installation"]["managed"], "isolated fixture is not a managed installation")
+        WebTest_Assert(state["installation"]["canUpdate"], "manual copy can update without install.json")
+        WebTest_Assert(!LTInstall_CheckUpdate()["available"] && g_WebTestUpdateFetches = 1, "manual copy checks a manifest without using the network in tests")
+        g_WebTestUpdateVersion := "1.5.1"
+        WebTest_Assert(LTInstall_CheckUpdate()["available"], "manual copy detects a newer stable update")
+        command := LTInstall_BuildUpdateCommand(LTInstall_Status())
+        WebTest_Assert(InStr(command, '-Update -InstallPath "' A_ScriptDir '" -WaitForPid ' ProcessExist()), "manual update targets the running copy and waits for its PID")
+        WebTest_Assert(InStr(command, "-NoAutostart"), "manual update preserves disabled autostart")
+        SettingsGui_ShowPage("Installation")
+        WebTest_Assert(g_SettingsActionBtn1.Enabled, "native update button is enabled for a manual copy")
+        FileAppend("gitdir: test", A_ScriptDir "\.git", "UTF-8")
+        fetches := g_WebTestUpdateFetches
+        WebTest_Assert(!LTInstall_Status()["canUpdate"] && !LTInstall_CheckUpdate()["available"] && g_WebTestUpdateFetches = fetches, "Git copy is blocked before fetching updates")
+        rejected := false
+        try LTInstall_StartUpdate("1.5.1")
+        catch
+            rejected := true
+        WebTest_Assert(rejected, "Git copy cannot start an update")
+        SettingsGui_ShowPage("Installation")
+        WebTest_Assert(!g_SettingsActionBtn1.Enabled, "native update button respects Git protection")
+        FileDelete(A_ScriptDir "\.git")
+        g_WebTestUpdateVersion := ""
+        SettingsGui_Close()
+        WebTest_Assert(LTInstall_CompareVersions("1.5.0", "1.5.0-beta.2") = 1, "stable version follows beta")
+        WebTest_Assert(LTInstall_CompareVersions("1.5.0-beta.3", "1.5.0-beta.2") = 1, "later beta is newer")
+        WebTest_Assert(LTInstall_CompareVersions("1.4.1", "1.5.0-beta.2") = -1, "older version is not an update")
+        manifest := JSON.parse(FileRead(A_ScriptDir "\latest.json", "UTF-8"))
+        WebTest_Assert(LTInstall_EvaluateUpdate(manifest, "1.4.1")["available"], "manifest offers an update to an older version")
+        WebTest_Assert(!LTInstall_EvaluateUpdate(manifest, manifest["version"])["available"], "manifest does not offer the same version")
+        shortcutPath := A_ScriptDir "\test-startup.lnk"
+        shortcut := ComObject("WScript.Shell").CreateShortcut(shortcutPath)
+        shortcut.TargetPath := A_ScriptDir "\Run_Layout_Toolkit.cmd"
+        shortcut.WorkingDirectory := A_ScriptDir
+        shortcut.Save()
+        WebTest_Assert(LTInstall_ShortcutIsCurrent(shortcutPath), "own direct startup shortcut is recognized")
+        shortcut.TargetPath := A_ScriptFullPath
+        shortcut.Save()
+        WebTest_Assert(LTInstall_ShortcutIsCurrent(shortcutPath), "legacy direct-script shortcut is recognized")
+        shortcut.TargetPath := A_WinDir "\System32\WindowsPowerShell\v1.0\powershell.exe"
+        shortcut.Arguments := '-NoProfile -File "' A_ScriptDir '\Resolve_AutoHotkey.ps1" -ScriptPath "' A_ScriptFullPath '"'
+        shortcut.WorkingDirectory := A_ScriptDir
+        shortcut.Save()
+        WebTest_Assert(LTInstall_ShortcutIsCurrent(shortcutPath), "legacy resolver shortcut is recognized")
+        shortcut.TargetPath := A_ScriptDir "\another-copy.cmd"
+        shortcut.Save()
+        WebTest_Assert(!LTInstall_ShortcutIsCurrent(shortcutPath), "foreign startup shortcut is not claimed")
+        startupDir := A_ScriptDir "\TestStartup"
+        DirCreate(startupDir)
+        paths := [startupDir "\Layout Toolkit.lnk", startupDir "\Layout Toolkit RU-EN.lnk"]
+        shortcut := ComObject("WScript.Shell").CreateShortcut(paths[2])
+        shortcut.TargetPath := A_ScriptDir "\another-copy.cmd"
+        shortcut.Save()
+        WebTest_Assert(LTInstall_StartupStatus(paths)["conflict"], "foreign legacy shortcut is detected")
+        rejected := false
+        try LTInstall_SetAutostart(true, paths)
+        catch
+            rejected := true
+        WebTest_Assert(rejected && !FileExist(paths[1]) && FileExist(paths[2]), "foreign startup shortcut is preserved")
+        FileDelete(paths[2])
+        FileAppend("@echo off`n", A_ScriptDir "\Run_Layout_Toolkit.cmd", "UTF-8")
+        shortcut := ComObject("WScript.Shell").CreateShortcut(paths[2])
+        shortcut.TargetPath := A_ScriptFullPath
+        shortcut.Save()
+        WebTest_Assert(LTInstall_IsManaged(Map("installPath", A_ScriptDir)), "matching install state is managed outside Git")
+        EnvSet("LOCALAPPDATA", A_ScriptDir "\InstallStateRoot")
+        DirCreate(A_ScriptDir "\InstallStateRoot\Layout Toolkit")
+        FileAppend(JSON.stringify(Map("schemaVersion", 1, "installPath", A_ScriptDir, "installedVersion", "1.4.1", "autostart", JSON.false)), LTInstall_StatePath(), "UTF-8")
+        WebTest_Assert(LTInstall_Status()["managed"], "matching install.json enables managed state")
+        WebTest_Assert(LTInstall_Status()["installedVersion"] = "v1.5.0", "update comparison uses actual files, not stale install state")
+        LTInstall_SaveAutostartState(true)
+        WebTest_Assert(LTInstall_ReadState()["autostart"], "autostart preference is saved in install.json")
+        LTInstall_SetAutostart(true, paths)
+        WebTest_Assert(LTInstall_StartupStatus(paths)["enabled"], "startup can be enabled for current copy")
+        WebTest_Assert(!FileExist(paths[2]), "own legacy startup shortcut is replaced by canonical shortcut")
+        LTInstall_SetAutostart(false, paths)
+        WebTest_Assert(!FileExist(paths[1]), "startup can be disabled for current copy")
         WebTest_Assert(state["hotkeys"].Length = 7, "seven hotkey actions")
         WebTest_Assert(InStr(state["dataDir"], "UserData"), "isolated profile")
         frame := Gui()
@@ -129,7 +256,23 @@ WebTest_Run() {
         WebTest_Assert(LTApplyWindowTheme(frame.Hwnd, "Light"), "native DWM light frame restored")
         frame.Destroy()
         WebTest_Assert(state["theme"] = "Light", "light theme defaults safely")
-        WebTest_Assert(!state["live"]["switchInputLanguage"], "missing Live layout switch setting defaults to off")
+        WebTest_Assert(!state["general"]["switchInputLanguage"], "missing shared setting defaults to off")
+        IniWrite("0", g_ConfigPath, "General", "LiveSwitchInputLanguage")
+        WebTest_Assert(!ReadInputLanguageSwitchSetting(), "legacy disabled value is preserved")
+        IniWrite("1", g_ConfigPath, "General", "LiveSwitchInputLanguage")
+        LTWebSettings.ApplyGeneral()
+        WebTest_Assert(LTWebSettings.State()["general"]["switchInputLanguage"], "legacy Live preference is preserved")
+        LTWebSettings.SaveGeneral(Map("switchInputLanguage", false))
+        WebTest_Assert(!ReadInputLanguageSwitchSetting(), "new disabled preference overrides legacy enabled value")
+        OpenNativeSettingsGui()
+        WebTest_Assert(g_SettingsSwitchLanguageChk.Visible, "native shared toggle is on General")
+        g_SettingsSwitchLanguageChk.Value := 1
+        SettingsGui_SaveGeneralSettings()
+        WebTest_Assert(ReadInputLanguageSwitchSetting(), "native shared toggle saves the common preference")
+        SettingsGui_ShowPage("Live")
+        WebTest_Assert(!g_SettingsSwitchLanguageChk.Visible, "native Live has no duplicate shared toggle")
+        SettingsGui_Close()
+        LTWebSettings.SaveGeneral(Map("switchInputLanguage", true))
         result := LTWebSettings.SaveTheme(Map("theme", "Dark"))
         WebTest_Assert(result["theme"] = "Dark" && LTWebSettings.State()["theme"] = "Dark", "dark theme persisted")
         rejected := false
@@ -138,11 +281,11 @@ WebTest_Run() {
             rejected := true
         WebTest_Assert(rejected && LTWebSettings.State()["theme"] = "Dark", "invalid theme rejected")
         LTWebSettings.SaveTheme(Map("theme", "Light"))
-        data := JSON.parse('{"enabled":true,"trigger":"Hotkey","interval":550,"switchInputLanguage":true,"hint":true}')
+        data := JSON.parse('{"enabled":true,"trigger":"Hotkey","interval":550,"hint":true}')
         LTWebSettings.SaveLive(data)
         WebTest_Assert(IniRead(g_ConfigPath, "General", "DoubleSpaceMs") = 550, "live interval saved")
-        WebTest_Assert(IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage") = 1, "Live layout switch saved")
-        WebTest_Assert(LTWebSettings.State()["live"]["switchInputLanguage"], "Live layout switch applied at runtime")
+        WebTest_Assert(IniRead(g_ConfigPath, "General", "SwitchInputLanguageAfterConversion") = 1, "shared preference saved")
+        WebTest_Assert(LTWebSettings.State()["general"]["switchInputLanguage"], "Live save leaves common preference unchanged")
         WebTest_Assert(LTWebSettings.State()["live"]["trigger"] = "Hotkey", "runtime live mode updated")
         WebTest_Assert(g_RegisteredLiveConvertHotkey = g_HotkeyLiveConvert, "Live hotkey registered in Hotkey trigger mode")
         before := FileRead(g_ConfigPath)
@@ -402,7 +545,7 @@ WebTest_BrowserRun() {
         stream := WebView2.CreateFileStream(A_ScriptDir "\settings-compact.png", "w")
         core.CapturePreviewAsync(0, stream).await2(5000)
         stream := 0
-        FileAppend("PASS: WebView2 bridge, eight pages, form validation, save, discard and unsaved navigation`n", "*", "UTF-8")
+        FileAppend("PASS: WebView2 bridge, nine pages, form validation, save, discard and unsaved navigation`n", "*", "UTF-8")
         LTWebSettings.Dispose()
         ExitApp(0)
     } catch as err {

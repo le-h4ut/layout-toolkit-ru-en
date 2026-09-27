@@ -2,8 +2,15 @@
 #SingleInstance Force
 #UseHook
 
+#Include Modules\HealthCheck.ahk
+if A_Args.Length && A_Args[1] = "--health-check"
+    LTHealth_Run()
+LTHealth_PrepareStartupCheck()
+
 #Include Modules\UnicodeInput.ahk
 #Include Modules\CapsLockFix.ahk
+#Include Modules\DebugUIView.ahk
+#Include Modules\InstallationSettings.ahk
 #Include Modules\SettingsGui.ahk
 #Include Modules\WebSettings.ahk
 #Include Modules\WebUnicodeInput.ahk
@@ -72,6 +79,7 @@ global g_HotkeyCapsLockFullFix := ""
 
 global g_RegisteredHotkeys := []
 global g_RegisteredLiveConvertHotkey := ""
+global g_StartupHotkeysReady := false
 
 EnsureUserDataDir()
 MigrateUserData()
@@ -90,7 +98,8 @@ if FileExist(g_IconPath) {
 global g_LiveEnabled := IniRead(g_ConfigPath, "General", "LiveEnabled", "0") = "1"
 global g_LiveTriggerMode := ReadLiveTriggerMode()
 global g_DoubleSpaceMs := ReadLiveDoubleSpaceMs()
-global g_LiveSwitchInputLanguage := IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage", "0") = "1"
+global g_SwitchInputLanguageAfterConversion := ReadInputLanguageSwitchSetting()
+global g_SelectedConversionBusy := false
 global g_ShowFirstToggleHint := IniRead(g_ConfigPath, "General", "ShowFirstToggleHint", "1") = "1"
 global g_FirstToggleHintShown := IniRead(g_ConfigPath, "General", "FirstToggleHintShown", "0") = "1"
 
@@ -530,9 +539,10 @@ if (firstRunDone != "1") {
 ; Горячие клавиши читаются из Documents\Layout Toolkit\hotkeys.ini.
 ; Важно: RegisterHotkeys() должен быть ДО первых статических hotkey-строк.
 RegisterHotkeys()
+LTHealth_ReportStartupReady()
 ; Unicode Input is used frequently: prepare its hidden WebView shortly after
 ; startup, then reuse it instead of paying the browser startup cost per call.
-SetTimer(ObjBindMethod(LTWebUnicodeInput, "Prewarm"), -1500)
+SetTimer(LTDebugUI_PrewarmUnicode, -1500)
 OnExit((*) => LTWebUnicodeInput.Dispose())
 
 ; Сброс буфера при клике мышью.
@@ -548,6 +558,7 @@ $*Space::LiveSpacePressed()
 #MaxThreadsPerHotkey 1
 
 RegisterHotkeys() {
+    global g_StartupHotkeysReady
     global g_HotkeyLayoutFull, g_HotkeyLayoutMajority, g_HotkeyLiveToggle
     global g_HotkeyUnicodeInput, g_HotkeyCapsLockFix, g_HotkeyCapsLockFullFix
     global g_RegisteredHotkeys
@@ -588,6 +599,7 @@ RegisterHotkeys() {
         success := false
     }
 
+    g_StartupHotkeysReady := success
     return success
 }
 
@@ -1151,59 +1163,110 @@ ToggleLiveMode(*) {
 ; ============================================================
 
 ConvertSelectedFullHotkey() {
-    global g_AppName
+    return ConvertSelectedLayoutHotkey("Full")
+}
 
-    title := g_AppName " — Полное исправление"
-    oldClipboard := ClipboardAll()
 
-    A_Clipboard := ""
-    Send "^c"
+ReadInputLanguageSwitchSetting(path := "") {
+    global g_ConfigPath
+    if path = ""
+        path := g_ConfigPath
+    ; The new key takes precedence, including an explicit disabled value.
+    legacy := IniRead(path, "General", "LiveSwitchInputLanguage", "0")
+    return IniRead(path, "General", "SwitchInputLanguageAfterConversion", legacy) = "1"
+}
 
-    if !ClipWait(1.0) {
-        A_Clipboard := oldClipboard
-        Notify("Не удалось получить выделенный текст", title, "Icon!")
-        return
+
+GetSelectedConversionDirection(text, result, mode) {
+    if text == result
+        return ""
+    if mode = "Majority" {
+        CountLayoutLetters(text, &latin, &cyrillic)
+        return latin > cyrillic ? "RU_TO_EN" : cyrillic > latin ? "EN_TO_RU" : ""
     }
+    if mode != "Full" || StrLen(text) != StrLen(result)
+        return ""
 
-    text := A_Clipboard
-
-    if (text = "") {
-        A_Clipboard := oldClipboard
-        Notify("Выделенный текст пуст", title, "Icon!")
-        return
+    ; Only changed letters determine the direction. Preserved exceptions do not.
+    enToRu := false, ruToEn := false
+    convertedChars := StrSplit(result)
+    for index, ch in StrSplit(text) {
+        if ch == convertedChars[index]
+            continue
+        enToRu := enToRu || IsLatin(ch)
+        ruToEn := ruToEn || IsCyrillic(ch)
+        if enToRu && ruToEn
+            return ""
     }
+    return enToRu ? "EN_TO_RU" : ruToEn ? "RU_TO_EN" : ""
+}
 
-    result := ConvertFullText(text)
 
-    if (result = text) {
-        A_Clipboard := oldClipboard
-        Notify("Не удалось определить раскладку или исправлять нечего", title, "Iconi")
-        return
-    }
+SelectedConversionTargetMatches(targetWindow, targetFocus) {
+    return targetWindow && WinExist("A") = targetWindow
+        && GetLiveInputTargetHwnd(targetWindow) = targetFocus
+}
 
+
+ConvertSelectedLayoutHotkey(mode) {
+    global g_AppName, g_SelectedConversionBusy, g_LiveBusy
+    if g_SelectedConversionBusy || g_LiveBusy
+        return false
+    targetWindow := WinExist("A")
+    targetFocus := GetLiveInputTargetHwnd(targetWindow)
+    if !targetFocus
+        return false
+    title := g_AppName (mode = "Full" ? " — Полное исправление" : " — Исправление по большинству")
+    g_SelectedConversionBusy := true
     try {
+        oldClipboard := ClipboardAll()
         A_Clipboard := ""
-	Sleep 30
-	A_Clipboard := result
-	
-	if !ClipWait(0.5) {
-		A_Clipboard := oldClipboard
-		Notify("Не удалось подготовить исправленный текст. Буфер обмена восстановлен", title, "Icon!")
-		return
-	}
-	
-	Sleep 150
-	Send "^v"
-	
-	Sleep 500
-	A_Clipboard := oldClipboard
-
-        Notify("Текст исправлен", title, "Iconi", true)
-    } catch as err {
-        try {
-            A_Clipboard := oldClipboard
+        if !SelectedConversionTargetMatches(targetWindow, targetFocus)
+            return false
+        Send "^c"
+        if !ClipWait(1.0) {
+            Notify("Не удалось получить выделенный текст", title, "Icon!")
+            return false
         }
+        if !SelectedConversionTargetMatches(targetWindow, targetFocus)
+            return false
+        text := A_Clipboard
+        result := mode = "Full" ? ConvertFullText(text) : ConvertToMajority(text)
+        if text = "" || result == text {
+            Notify("В выделенном тексте нечего исправлять", title, "Iconi")
+            return false
+        }
+        direction := GetSelectedConversionDirection(text, result, mode)
+        A_Clipboard := ""
+        Sleep 30
+        A_Clipboard := result
+        if !ClipWait(0.5) {
+            Notify("Не удалось подготовить исправленный текст", title, "Icon!")
+            return false
+        }
+        Sleep 150
+        Critical "On"
+        try {
+            if !SelectedConversionTargetMatches(targetWindow, targetFocus) || !(A_Clipboard == result)
+                return false
+            Send "^v"
+            ResetTypingBuffer(false)
+        } finally {
+            Critical "Off"
+        }
+        ; Keep the clipboard alive until the target has had time to consume it.
+        Sleep 500
+        if SelectedConversionTargetMatches(targetWindow, targetFocus) && direction != ""
+            TrySwitchInputLanguage(targetWindow, direction, targetFocus)
+        Notify("Текст исправлен", title, "Iconi", true)
+        return true
+    } catch as err {
         Notify("Не удалось вставить исправленный текст: " err.Message, title, "Iconx")
+        return false
+    } finally {
+        if IsSet(oldClipboard)
+            try A_Clipboard := oldClipboard
+        g_SelectedConversionBusy := false
     }
 }
 
@@ -1281,60 +1344,7 @@ ConvertFullTokenByDirection(token, direction) {
 ; ============================================================
 
 ConvertSelectedMajorityHotkey() {
-    global g_AppName
-
-    title := g_AppName " — Исправление по большинству"
-    oldClipboard := ClipboardAll()
-
-    A_Clipboard := ""
-    Send "^c"
-
-    if !ClipWait(1.0) {
-        A_Clipboard := oldClipboard
-        Notify("Не удалось получить выделенный текст", title, "Icon!")
-        return
-    }
-
-    text := A_Clipboard
-
-    if (text = "") {
-        A_Clipboard := oldClipboard
-        Notify("Выделенный текст пуст", title, "Icon!")
-        return
-    }
-
-    result := ConvertToMajority(text)
-
-    if (result = text) {
-        A_Clipboard := oldClipboard
-        Notify("В выделенном тексте нечего исправлять", title, "Iconi")
-        return
-    }
-
-    try {
-    A_Clipboard := ""
-	Sleep 30
-	A_Clipboard := result
-	
-	if !ClipWait(0.5) {
-		A_Clipboard := oldClipboard
-		Notify("Не удалось подготовить исправленный текст. Буфер обмена восстановлен", title, "Icon!")
-		return
-	}
-
-	Sleep 150
-	Send "^v"
-
-	Sleep 500
-	A_Clipboard := oldClipboard
-
-        Notify("Текст исправлен", title, "Iconi", true)
-    } catch as err {
-        try {
-            A_Clipboard := oldClipboard
-        }
-        Notify("Не удалось вставить исправленный текст: " err.Message, title, "Iconx")
-    }
+    return ConvertSelectedLayoutHotkey("Majority")
 }
 
 
@@ -1592,6 +1602,7 @@ FlushLivePendingAfterOperation(replacementApplied := true, contextInvalidated :=
 
 LiveConvertHotkeyPressed(*) {
     global g_LiveOperationFocus
+    global g_SelectedConversionBusy
     global g_LiveEnabled, g_LiveTriggerMode, g_LiveBusy
     global g_Buffer, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
@@ -1606,7 +1617,7 @@ LiveConvertHotkeyPressed(*) {
     try {
         ; Повторный хоткей во время уже идущей замены полностью игнорируется.
         ; Обычный физический ввод при этом продолжает собираться в pending.
-        if (g_LiveEnabled && g_LiveTriggerMode = "Hotkey" && !g_LiveBusy) {
+        if (g_LiveEnabled && g_LiveTriggerMode = "Hotkey" && !g_LiveBusy && !g_SelectedConversionBusy) {
             currentWindow := WinExist("A")
 
             if (currentWindow != g_LastWindow) {
@@ -1639,6 +1650,7 @@ LiveConvertHotkeyPressed(*) {
 
 LiveSpacePressed() {
     global g_LiveOperationFocus
+    global g_SelectedConversionBusy
     global g_LiveEnabled, g_LiveTriggerMode, g_LiveBusy
     global g_Buffer, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
@@ -1679,7 +1691,8 @@ LiveSpacePressed() {
         }
 
         ; Защитная ветка на случай переключения режима между событием и callback.
-        if (!g_LiveEnabled || g_LiveTriggerMode != "DoubleSpace") {
+        if (g_SelectedConversionBusy || !g_LiveEnabled || g_LiveTriggerMode != "DoubleSpace") {
+            g_LastSpaceTick := 0
             SendPlainSpace()
             return
         }
@@ -2100,16 +2113,22 @@ KeyboardLayoutMatchesDirection(hkl, direction) {
 
 
 TrySwitchLiveInputLanguage(targetWindow, direction) {
-    global g_LiveSwitchInputLanguage
-    global g_LiveContextInvalidated, g_LiveOperationFocus
+    global g_LiveOperationFocus
+    return TrySwitchInputLanguage(targetWindow, direction, g_LiveOperationFocus, true)
+}
 
-    if !g_LiveSwitchInputLanguage {
+
+TrySwitchInputLanguage(targetWindow, direction, expectedFocus := 0, liveOperation := false) {
+    global g_SwitchInputLanguageAfterConversion
+    global g_LiveContextInvalidated
+
+    if !g_SwitchInputLanguageAfterConversion {
         return false
     }
 
     try {
         ; Never redirect the request to whichever application became active later.
-        if (g_LiveContextInvalidated || !targetWindow || WinExist("A") != targetWindow) {
+        if ((liveOperation && g_LiveContextInvalidated) || !targetWindow || WinExist("A") != targetWindow) {
             return false
         }
 
@@ -2120,7 +2139,7 @@ TrySwitchLiveInputLanguage(targetWindow, direction) {
 
         inputWindow := GetLiveInputTargetHwnd(targetWindow)
         if (!inputWindow || WinExist("A") != targetWindow
-            || (g_LiveOperationFocus && inputWindow != g_LiveOperationFocus)) {
+            || (expectedFocus && inputWindow != expectedFocus)) {
             return false
         }
 
@@ -2132,7 +2151,7 @@ TrySwitchLiveInputLanguage(targetWindow, direction) {
         ; PostMessage is asynchronous. Let the focused control process the
         ; request, then retry through the top-level window only if necessary.
         Sleep 60
-        if (g_LiveContextInvalidated || WinExist("A") != targetWindow
+        if ((liveOperation && g_LiveContextInvalidated) || WinExist("A") != targetWindow
             || GetLiveInputTargetHwnd(targetWindow) != inputWindow) {
             return false
         }
@@ -2148,7 +2167,7 @@ TrySwitchLiveInputLanguage(targetWindow, direction) {
         }
 
         return WinExist("A") = targetWindow
-            && !g_LiveContextInvalidated
+            && !(liveOperation && g_LiveContextInvalidated)
             && GetLiveInputTargetHwnd(targetWindow) = inputWindow
             && KeyboardLayoutMatchesDirection(GetWindowKeyboardLayout(inputWindow), direction)
     } catch {
@@ -2162,7 +2181,7 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
     global g_LiveBusy, g_LivePendingBuffer
     global g_LiveContextInvalidated, g_LiveOperationWindow
     global g_LiveBoundarySourcePrefix, g_LiveBoundaryReplacementPrefix
-    global g_LivePendingDirection, g_LiveSwitchInputLanguage
+    global g_LivePendingDirection, g_SwitchInputLanguageAfterConversion
 
     fragment := RTrim(rawFragment, " `t`r`n")
 
@@ -2213,7 +2232,7 @@ DoLiveConvertAndReplace(rawFragment, title, targetWindow, replacementSuffix := "
     replacementStarted := false
     replacementCompleted := false
     inputLanguageSwitched := false
-    g_LivePendingDirection := (g_LiveSwitchInputLanguage && FindInstalledKeyboardLayout(direction)) ? direction : ""
+    g_LivePendingDirection := (g_SwitchInputLanguageAfterConversion && FindInstalledKeyboardLayout(direction)) ? direction : ""
 
     try {
         SyncLivePendingContext()

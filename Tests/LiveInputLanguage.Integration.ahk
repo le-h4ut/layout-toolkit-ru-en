@@ -9,7 +9,7 @@ LiveTest_NoOp(*) {
 }
 
 RunLiveInputLanguageIntegrationTests() {
-    global g_LiveSwitchInputLanguage := true
+    global g_SwitchInputLanguageAfterConversion := true
     global g_LiveEnabled := true
     global g_ShowTrayTips := false
     global ih
@@ -38,6 +38,7 @@ RunLiveInputLanguageIntegrationTests() {
         LiveIntegration_EndToEnd(testGui, testEdit, "DoubleSpace")
         LiveIntegration_EndToEnd(testGui, testEdit, "Hotkey")
         LiveIntegration_FocusChange(testGui, testEdit)
+        SelectedIntegration_Run(testGui, testEdit)
 
         testGui.Destroy()
         FileAppend("PASS: real Edit control preserves converted text and switches its RU/EN input language`n", "*", "UTF-8")
@@ -46,6 +47,79 @@ RunLiveInputLanguageIntegrationTests() {
         FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")
         ExitApp(1)
     }
+}
+
+RunSelectedInputLanguageIntegrationTests() {
+    global g_LiveEnabled := false, g_ShowTrayTips := false, ih
+    oldClipboard := ClipboardAll()
+    ih := InputHook("V L0 I1")
+    testGui := Gui("+AlwaysOnTop", "Layout Toolkit selection integration test")
+    testEdit := testGui.AddEdit("w480 h100")
+    exitCode := 0
+    try {
+        testGui.Show("x-30000 y-30000 w520 h140")
+        WinActivate("ahk_id " testGui.Hwnd)
+        if !WinWaitActive("ahk_id " testGui.Hwnd, , 2)
+            throw Error("test input window did not become active")
+        A_Clipboard := "CLIPBOARD_SENTINEL"
+        SelectedIntegration_Run(testGui, testEdit)
+        LiveIntegration_Assert(A_Clipboard = "CLIPBOARD_SENTINEL", "selection clipboard restored")
+    } catch as err {
+        FileAppend(err.Message "`n" err.Stack "`n", "**", "UTF-8")
+        exitCode := 1
+    } finally {
+        testGui.Destroy()
+        A_Clipboard := oldClipboard
+    }
+    ExitApp(exitCode)
+}
+
+SelectedIntegration_Run(testGui, testEdit) {
+    global g_SwitchInputLanguageAfterConversion, g_LiveEnabled, ih
+    g_LiveEnabled := false
+    ih.Stop()
+    for item in [
+        ["Full", "Ghbdtn vbh", "Привет мир", "EN_TO_RU"],
+        ["Full", "Привет мир", "Ghbdtn vbh", "RU_TO_EN"],
+        ["Majority", "Привет мир Ghbdtn", "Привет мир Привет", "EN_TO_RU"],
+        ["Majority", "Hello world руддщ", "Hello world hello", "RU_TO_EN"]
+    ] {
+        g_SwitchInputLanguageAfterConversion := true
+        sourceDirection := item[4] = "EN_TO_RU" ? "RU_TO_EN" : "EN_TO_RU"
+        DllCall("ActivateKeyboardLayout", "Ptr", FindInstalledKeyboardLayout(sourceDirection), "UInt", 0, "Ptr")
+        testEdit.Value := item[2]
+        testEdit.Focus()
+        Send "^a"
+        result := item[1] = "Full" ? ConvertSelectedFullHotkey() : ConvertSelectedMajorityHotkey()
+        LiveIntegration_Assert(result && testEdit.Value == item[3], item[1] ": real selected text replaced; actual=" testEdit.Value)
+        LiveIntegration_Assert(KeyboardLayoutMatchesDirection(GetWindowKeyboardLayout(testEdit.Hwnd), item[4]), item[1] ": real target HKL switched")
+    }
+    for mode in ["Full", "Majority"] {
+        g_SwitchInputLanguageAfterConversion := false
+        beforeHkl := GetWindowKeyboardLayout(testEdit.Hwnd)
+        testEdit.Value := mode = "Full" ? "Ghbdtn" : "Привет мир Ghbdtn"
+        testEdit.Focus()
+        Send "^a"
+        result := mode = "Full" ? ConvertSelectedFullHotkey() : ConvertSelectedMajorityHotkey()
+        LiveIntegration_Assert(result && GetWindowKeyboardLayout(testEdit.Hwnd) = beforeHkl, mode ": disabled preserves HKL")
+    }
+    g_SwitchInputLanguageAfterConversion := true
+    beforeHkl := GetWindowKeyboardLayout(testEdit.Hwnd)
+    testEdit.Value := "Ghbdtn Привет"
+    testEdit.Focus()
+    Send "^a"
+    LiveIntegration_Assert(ConvertSelectedFullHotkey() && testEdit.Value == "Привет Ghbdtn", "Full: mixed text is still converted")
+    LiveIntegration_Assert(GetWindowKeyboardLayout(testEdit.Hwnd) = beforeHkl, "Full: ambiguous direction preserves HKL")
+
+    otherEdit := testGui.AddEdit("w100")
+    testEdit.Value := "Ghbdtn"
+    testEdit.Focus()
+    Send "^a"
+    SetTimer((*) => otherEdit.Focus(), -60)
+    LiveIntegration_Assert(!ConvertSelectedFullHotkey(), "Full: changed focus cancels replacement")
+    LiveIntegration_Assert(testEdit.Value == "Ghbdtn" && otherEdit.Value = "", "Full: neither field is overwritten after focus change")
+    LiveIntegration_Assert(GetWindowKeyboardLayout(testEdit.Hwnd) = beforeHkl, "Full: changed focus preserves HKL")
+    FileAppend("PASS: real Full/Majority selection replacement and HKL, disabled setting, ambiguity and focus change`n", "*", "UTF-8")
 }
 
 LiveIntegration_FocusChange(testGui, testEdit) {
@@ -82,7 +156,7 @@ LiveIntegration_MoveFocus(otherEdit) {
 LiveIntegration_EndToEnd(testGui, testEdit, trigger) {
     global g_LiveTriggerMode := trigger
     global g_HotkeyLiveConvert := "#F9"
-    global g_LiveSwitchInputLanguage := true
+    global g_SwitchInputLanguageAfterConversion := true
     global g_LiveBusy, g_Buffer, ih
     DllCall("ActivateKeyboardLayout", "Ptr", FindInstalledKeyboardLayout("RU_TO_EN"), "UInt", 0, "Ptr")
     testEdit.Value := ""

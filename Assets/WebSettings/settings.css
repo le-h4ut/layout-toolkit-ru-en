@@ -17,6 +17,8 @@ main{flex:1;min-width:0;overflow:auto;padding:36px 40px 0;position:relative}head
 nav { gap:3px; }
 nav button { padding:8px 9px; gap:7px; font-size:12px; }
 nav button span { width:19px; font-size:17px; flex-shrink:0; }
+nav button .nav-icon { display:inline-flex; align-items:center; justify-content:center; height:20px; }
+nav .nav-icon svg { display:block; width:18px; height:18px; flex-shrink:0; }
 .sidebar-bottom { padding:12px 9px 0; font-size:11px; }
 .sidebar-bottom small { margin-top:5px; }
 main { display:grid; grid-template-rows:auto minmax(0,1fr) auto; overflow:hidden; padding:16px 18px 0; }

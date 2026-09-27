@@ -6,6 +6,9 @@ LiveTest_Assert(condition, label) {
 
 RunLiveInputLanguageTests() {
     global g_LiveTestIgnoreAll := false
+    global g_LiveTestFocusHwnd := 777
+    global g_LiveTestNoLayout := false
+    global g_SelectionTestActive := false
     try {
         LiveTest_Assert(GetInstalledKeyboardLayouts() is Array, "Windows keyboard-layout enumeration returns an array")
         LiveTest_Assert(GetLiveInputTargetHwnd(0) = 0, "invalid target window has no focused HWND")
@@ -28,6 +31,7 @@ RunLiveInputLanguageTests() {
         LiveTest_RunCase("layout request failed", "Hotkey", "Ghbdtn", true, true, false, false, true, true, 0)
         LiveTest_VerifyFocusedWindowFallback()
         LiveTest_Regressions()
+        SelectedTest_Run()
 
         FileAppend("PASS: Live input-language switching for both directions and triggers, disabled, failed and changed-window paths`n", "*", "UTF-8")
         ExitApp(0)
@@ -38,7 +42,7 @@ RunLiveInputLanguageTests() {
 }
 
 LiveTest_VerifyFocusedWindowFallback() {
-    global g_LiveSwitchInputLanguage := true
+    global g_SwitchInputLanguageAfterConversion := true
     global g_LiveTestActiveWindow := 100
     global g_LiveTestPostThrows := false
     global g_LiveTestRequests := []
@@ -53,7 +57,7 @@ LiveTest_VerifyFocusedWindowFallback() {
 }
 
 LiveTest_RunCase(label, trigger, rawFragment, enabled, clipboardReady, sendThrows, changeWindowOnSend, postThrows, expectedSuccess, expectedHkl, pendingDuringSend := "", expectedPendingOutput := "") {
-    global g_LiveSwitchInputLanguage := enabled
+    global g_SwitchInputLanguageAfterConversion := enabled
     global g_LiveBusy := true
     global g_LivePendingBuffer := ""
     global g_LiveContextInvalidated := false
@@ -110,6 +114,12 @@ LiveTest_ClipboardAll() {
 
 LiveTest_ClipWait(*) {
     global g_LiveTestClipboardReady
+    global g_SelectionTestActive, g_SelectionTestClipWaitCount, g_SelectionTestPrepareFails
+    if g_SelectionTestActive {
+        g_SelectionTestClipWaitCount++
+        if g_SelectionTestPrepareFails && g_SelectionTestClipWaitCount = 2
+            return false
+    }
     return g_LiveTestClipboardReady
 }
 
@@ -141,11 +151,15 @@ LiveTest_WinExist() {
 }
 
 LiveTest_FindInstalledKeyboardLayout(direction) {
+    global g_LiveTestNoLayout
+    if g_LiveTestNoLayout
+        return 0
     return direction = "EN_TO_RU" ? 0x00000419 : direction = "RU_TO_EN" ? 0x00000809 : 0
 }
 
 LiveTest_GetLiveInputTargetHwnd(*) {
-    return 777
+    global g_LiveTestFocusHwnd
+    return g_LiveTestFocusHwnd
 }
 
 LiveTest_PostInputLanguageRequest(inputWindow, hkl) {

@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "channel": "prerelease",
-  "version": "1.5.0-beta.2",
-  "published_at": "2026-09-22T21:12:06Z",
-  "release_notes_url": "https://github.com/le-h4ut/layout-toolkit-ru-en/releases/tag/v1.5.0-beta.2",
+  "channel": "stable",
+  "version": "1.5.0",
+  "published_at": "2026-09-27T14:18:32Z",
+  "release_notes_url": "https://github.com/le-h4ut/layout-toolkit-ru-en/releases/tag/v1.5.0",
   "requirements": {
     "windows_min_build": 17763,
     "architecture": ["x64", "x86"]
   },
   "assets": {
     "windows": {
-      "url": "https://github.com/le-h4ut/layout-toolkit-ru-en/releases/download/v1.5.0-beta.2/Layout_Toolkit_RU_EN_v1.5.0-beta.2_Windows.zip",
-      "size": 352741,
-      "sha256": "95AECD3065206BB462BCA6B0787814EAB52634A7A2055FBDBC72500D398300AA"
+      "url": "https://github.com/le-h4ut/layout-toolkit-ru-en/releases/download/v1.5.0/Layout_Toolkit_RU_EN_v1.5.0_Windows.zip",
+      "size": 374152,
+      "sha256": "BC87AE6EC35C67CECD1CD4263063607612923155644A36860628A30A1FD1C9DD"
     }
   }
 }

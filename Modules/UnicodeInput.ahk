@@ -25,6 +25,15 @@
 g_UnicodeInputHistory := []
 g_UnicodeInputGuiStates := Map()
 
+UnicodeInput_CloseAllNative() {
+    global g_UnicodeInputGuiStates
+    windows := []
+    for _, state in g_UnicodeInputGuiStates
+        windows.Push(state.Gui)
+    for guiObj in windows
+        try UnicodeInput_CloseGui(guiObj)
+}
+
 
 OpenNativeUnicodeInput(mode := "insert") {
     global g_UnicodeInputGuiStates

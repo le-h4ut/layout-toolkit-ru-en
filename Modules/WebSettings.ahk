@@ -74,6 +74,7 @@ class LTWebSettings {
     static Ready := false
     static LoadGeneration := 0
     static Url := "https://layout-toolkit.invalid/index.html"
+    static LastUpdateVersion := ""
 
     static Open() {
         this.Requested := true
@@ -272,9 +273,13 @@ class LTWebSettings {
             switch message["command"] {
                 case "state": result := this.State()
                 case "saveTheme": result := this.SaveTheme(data)
+                case "saveGeneral": this.SaveGeneral(data), result := this.State()
                 case "saveLive": this.SaveLive(data), result := this.State()
                 case "saveUnicode": this.SaveUnicode(data), result := this.State()
                 case "saveHotkeys": this.SaveHotkeys(data), result := this.State()
+                case "setAutostart": result := this.SetAutostart(data)
+                case "checkUpdate": result := this.CheckUpdate()
+                case "installUpdate": this.InstallUpdate(data), result := this.State()
                 case "capture": result := this.CaptureHotkey(data["action"])
                 case "action": this.Action(data["name"]), result := this.State()
                 default: throw Error("Неизвестная команда")
@@ -288,7 +293,7 @@ class LTWebSettings {
     }
 
     static State() {
-        global g_ConfigDir, g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
+        global g_ConfigDir, g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_SwitchInputLanguageAfterConversion, g_ShowFirstToggleHint
         global g_ShowTrayTips, g_PlaySound, g_ExcludeWords, g_ExcludePath
         hotkeys := []
         values := SettingsGui_GetCurrentHotkeyValues()
@@ -299,10 +304,32 @@ class LTWebSettings {
         }
         return Map(
             "version", SettingsGui_GetVersionFromChangelog(), "dataDir", g_ConfigDir, "theme", this.LoadTheme(),
-            "live", Map("enabled", g_LiveEnabled, "trigger", g_LiveTriggerMode, "interval", g_DoubleSpaceMs, "switchInputLanguage", g_LiveSwitchInputLanguage, "hint", g_ShowFirstToggleHint),
+            "projectUrl", SettingsGui_GetProjectUrl(),
+            "general", Map("switchInputLanguage", g_SwitchInputLanguageAfterConversion),
+            "live", Map("enabled", g_LiveEnabled, "trigger", g_LiveTriggerMode, "interval", g_DoubleSpaceMs, "hint", g_ShowFirstToggleHint),
             "notifications", g_ShowTrayTips, "sound", g_PlaySound, "hotkeys", hotkeys,
             "unicode", Map("confirm", UnicodeInput_LoadConfirmSelectionWithEnter(), "moveHistory", UnicodeInput_LoadMoveHistoryOnUse(), "history", UnicodeInput_LoadHistoryShortcutModifier(), "favorite", UnicodeInput_LoadFavoriteShortcutModifier()),
-            "excludeCount", g_ExcludeWords.Count, "excludePath", g_ExcludePath)
+            "excludeCount", g_ExcludeWords.Count, "excludePath", g_ExcludePath,
+            "installation", LTInstall_Status())
+    }
+
+    static SetAutostart(data) {
+        enabled := this.Bool(data, "enabled")
+        LTInstall_SetAutostart(enabled)
+        return this.State()
+    }
+
+    static CheckUpdate() {
+        result := LTInstall_CheckUpdate()
+        this.LastUpdateVersion := result["available"] ? result["version"] : ""
+        return result
+    }
+
+    static InstallUpdate(data) {
+        version := String(data.Get("version", ""))
+        if version = "" || version != this.LastUpdateVersion
+            throw Error("Сначала проверьте наличие обновлений.")
+        LTInstall_StartUpdate(version)
     }
 
     static LoadTheme() {
@@ -354,6 +381,20 @@ class LTWebSettings {
         }
     }
 
+    static SaveGeneral(data) {
+        global g_ConfigPath, g_LiveBusy, g_SelectedConversionBusy
+        if g_LiveBusy || g_SelectedConversionBusy
+            throw Error("Дождитесь завершения исправления")
+        this.WriteIni(g_ConfigPath,
+            [["General", "SwitchInputLanguageAfterConversion", this.Bool(data, "switchInputLanguage")]],
+            ObjBindMethod(this, "ApplyGeneral"), ObjBindMethod(this, "ApplyGeneral"))
+    }
+
+    static ApplyGeneral() {
+        global g_SwitchInputLanguageAfterConversion
+        g_SwitchInputLanguageAfterConversion := ReadInputLanguageSwitchSetting()
+    }
+
     static SaveLive(data) {
         global g_ConfigPath, g_LiveBusy
         if g_LiveBusy
@@ -364,15 +405,14 @@ class LTWebSettings {
         interval := NormalizeLiveDoubleSpaceMs(String(data["interval"]), "")
         if (interval == "")
             throw Error("Интервал должен быть целым числом от 100 до 3000 мс")
-        entries := [["General", "LiveEnabled", this.Bool(data, "enabled")], ["General", "LiveTriggerMode", trigger], ["General", "DoubleSpaceMs", interval], ["General", "LiveSwitchInputLanguage", this.Bool(data, "switchInputLanguage")], ["General", "ShowFirstToggleHint", this.Bool(data, "hint")]]
+        entries := [["General", "LiveEnabled", this.Bool(data, "enabled")], ["General", "LiveTriggerMode", trigger], ["General", "DoubleSpaceMs", interval], ["General", "ShowFirstToggleHint", this.Bool(data, "hint")]]
         this.WriteIni(g_ConfigPath, entries, ObjBindMethod(this, "ApplyLive"), ObjBindMethod(this, "ApplyLive"))
     }
 
     static ApplyLive() {
-        global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
+        global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint
         g_LiveTriggerMode := ReadLiveTriggerMode()
         g_DoubleSpaceMs := ReadLiveDoubleSpaceMs()
-        g_LiveSwitchInputLanguage := IniRead(g_ConfigPath, "General", "LiveSwitchInputLanguage", "0") = "1"
         g_ShowFirstToggleHint := IniRead(g_ConfigPath, "General", "ShowFirstToggleHint", "1") = "1"
         if !SetLiveMode(IniRead(g_ConfigPath, "General", "LiveEnabled", "0") = "1", false, false)
             throw Error("Не удалось применить Live-настройки. Проверьте конфликты горячих клавиш.")
@@ -466,7 +506,9 @@ class LTWebSettings {
 
     static Action(name) {
         switch name {
+            case "openProject": SettingsGui_OpenProject()
             case "openData": OpenUserDataDir()
+            case "openInstallFolder": LTInstall_OpenFolder()
             case "restart": SettingsGui_RestartToolkit()
             case "openHotkeys": OpenHotkeysFile()
             case "reloadHotkeys": this.ApplyHotkeys()
@@ -481,5 +523,11 @@ class LTWebSettings {
 }
 
 OpenSettingsGui(*) {
-    LTWebSettings.Open()
+    if LTDebugUI_IsNative() {
+        LTWebSettings.Dispose()
+        OpenNativeSettingsGui()
+    } else {
+        SettingsGui_Close()
+        LTWebSettings.Open()
+    }
 }

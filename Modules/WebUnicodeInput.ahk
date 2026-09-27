@@ -428,5 +428,11 @@ class LTWebUnicodeInput {
 }
 
 UnicodeInput(mode := "insert") {
-    LTWebUnicodeInput.Open(mode)
+    if LTDebugUI_IsNative() {
+        LTWebUnicodeInput.Dispose()
+        OpenNativeUnicodeInput(mode)
+    } else {
+        UnicodeInput_CloseAllNative()
+        LTWebUnicodeInput.Open(mode)
+    }
 }

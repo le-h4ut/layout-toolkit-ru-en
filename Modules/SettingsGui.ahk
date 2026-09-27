@@ -25,7 +25,7 @@ g_SettingsLiveDoubleSpaceLabel := ""
 g_SettingsLiveDoubleSpaceEdit := ""
 g_SettingsLiveDoubleSpaceHint := ""
 g_SettingsLiveHintChk := ""
-g_SettingsLiveSwitchLanguageChk := ""
+g_SettingsSwitchLanguageChk := ""
 
 g_SettingsUnicodeConfirmChk := ""
 g_SettingsUnicodeMoveHistoryChk := ""
@@ -47,7 +47,7 @@ OpenNativeSettingsGui(*) {
     global g_SettingsGui, g_SettingsContentTitle, g_SettingsContentBody
     global g_SettingsActionBtn1, g_SettingsActionBtn2, g_SettingsActionBtn3
     global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceLabel, g_SettingsLiveDoubleSpaceEdit
-    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
+    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk, g_SettingsSwitchLanguageChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
     global g_SettingsUnicodeConfirmChk, g_SettingsUnicodeMoveHistoryChk
     global g_SettingsUnicodeHistoryModifierDDL, g_SettingsUnicodeFavoriteModifierDDL
@@ -75,7 +75,7 @@ OpenNativeSettingsGui(*) {
     btnH := 30
     gap := 6
 
-    SettingsGui_AddNavButton("Общее", "General", navX, navY, navW, btnH)
+    SettingsGui_AddNavButton("Обзор", "General", navX, navY, navW, btnH)
     navY += btnH + gap
 
     SettingsGui_AddNavButton("Layout Fix", "LayoutFix", navX, navY, navW, btnH)
@@ -96,6 +96,9 @@ OpenNativeSettingsGui(*) {
     SettingsGui_AddNavButton("Исключения", "Exclusions", navX, navY, navW, btnH)
     navY += btnH + gap
 
+    SettingsGui_AddNavButton("Установка", "Installation", navX, navY, navW, btnH)
+    navY += btnH + gap
+
     SettingsGui_AddNavButton("О программе", "About", navX, navY, navW, btnH)
 
     g_SettingsContentTitle := g_SettingsGui.AddText("x180 y14 w560 h28", "")
@@ -113,7 +116,7 @@ OpenNativeSettingsGui(*) {
     g_SettingsLiveDoubleSpaceEdit := g_SettingsGui.AddEdit("x395 y340 w90 h24 Number Hidden", "")
     g_SettingsLiveDoubleSpaceHint := g_SettingsGui.AddText("x495 y344 w190 h23 Hidden", "100–3000 мс")
     g_SettingsLiveHintChk := g_SettingsGui.AddCheckbox("x180 y370 w540 h24 Hidden", "Показывать подробную подсказку при первом включении Live-режима")
-    g_SettingsLiveSwitchLanguageChk := g_SettingsGui.AddCheckbox("x180 y396 w540 h24 Hidden", "Переключать раскладку после успешного исправления")
+    g_SettingsSwitchLanguageChk := g_SettingsGui.AddCheckbox("x180 y354 w540 h24 Hidden", "Переключать раскладку после исправления: Live, Full и Majority")
 
     g_SettingsUnicodeConfirmChk := g_SettingsGui.AddCheckbox("x180 y260 w540 h24 Hidden", "Подтверждать быстрый выбор клавишей Enter")
     g_SettingsUnicodeMoveHistoryChk := g_SettingsGui.AddCheckbox("x180 y290 w540 h24 Hidden", "Поднимать использованный символ в начало истории")
@@ -194,13 +197,15 @@ SettingsGui_AddNavButton(label, pageName, x, y, w, h) {
 
 SettingsGui_ShowPage(pageName, *) {
     global g_SettingsContentTitle, g_SettingsContentBody
+    global g_SettingsActionBtn1, g_SettingsActionBtn2
+    global g_SettingsSwitchLanguageChk, g_SwitchInputLanguageAfterConversion
 
     title := ""
     body := ""
 
     switch pageName {
         case "General":
-            title := "Общее"
+            title := "Обзор"
             body := SettingsGui_GetGeneralText()
 
         case "LayoutFix":
@@ -227,6 +232,10 @@ SettingsGui_ShowPage(pageName, *) {
             title := "Исключения"
             body := SettingsGui_GetExclusionsText()
 
+        case "Installation":
+            title := "Установка"
+            body := SettingsGui_GetInstallationText()
+
         case "About":
             title := "О программе"
             body := SettingsGui_GetAboutText()
@@ -243,6 +252,10 @@ SettingsGui_ShowPage(pageName, *) {
     SettingsGui_SetLiveControlsVisible(pageName = "Live")
     SettingsGui_SetHotkeyControlsVisible(pageName = "Hotkeys")
     SettingsGui_SetUnicodeControlsVisible(pageName = "Unicode")
+    if IsObject(g_SettingsSwitchLanguageChk) {
+        g_SettingsSwitchLanguageChk.Visible := pageName = "General"
+        g_SettingsSwitchLanguageChk.Value := g_SwitchInputLanguageAfterConversion ? 1 : 0
+    }
 
     if (pageName = "Live") {
         SettingsGui_UpdateLiveControls()
@@ -255,6 +268,7 @@ SettingsGui_ShowPage(pageName, *) {
     switch pageName {
         case "General":
             SettingsGui_SetActions(
+                "Сохранить", "SaveGeneralSettings",
                 "Открыть папку данных", "OpenDataDir",
                 "Перезапустить", "RestartToolkit"
             )
@@ -283,6 +297,19 @@ SettingsGui_ShowPage(pageName, *) {
                 "Применить изменения", "ReloadExcludeWords",
                 "Сбросить", "RestoreDefaultExcludeWords"
             )
+
+        case "Installation":
+            status := LTInstall_Status()
+            SettingsGui_SetActions(
+                "Проверить обновления", "CheckUpdates",
+                status["autostart"] ? "Отключить автозагрузку" : "Включить автозагрузку", "ToggleAutostart",
+                "Папка программы", "OpenInstallFolder"
+            )
+            g_SettingsActionBtn1.Enabled := status["canUpdate"]
+
+        case "About":
+            SettingsGui_SetActions("Проект на GitHub", "OpenProject", "Сайт — Coming soon...")
+            g_SettingsActionBtn2.Enabled := false
     
         default:
             SettingsGui_SetActions()
@@ -345,7 +372,7 @@ SettingsGui_GetLayoutFixText() {
 
 SettingsGui_GetLiveText() {
     global g_LiveEnabled, g_LiveTriggerMode, g_HotkeyLiveToggle, g_HotkeyLiveConvert
-    global g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
+    global g_DoubleSpaceMs, g_SwitchInputLanguageAfterConversion, g_ShowFirstToggleHint
 
     text := ""
     text .= "Live-режим сейчас: " SettingsGui_OnOff(g_LiveEnabled) "`r`n"
@@ -357,7 +384,7 @@ SettingsGui_GetLiveText() {
     text .= "Это альтернативные способы запуска: одновременно действует только выбранный вариант.`r`n"
     text .= "`r`n"
     text .= "Подсказка при первом включении: " SettingsGui_OnOff(g_ShowFirstToggleHint) "`r`n"
-    text .= "Автопереключение раскладки: " SettingsGui_OnOff(g_LiveSwitchInputLanguage) "`r`n"
+    text .= "Автопереключение раскладки: " SettingsGui_OnOff(g_SwitchInputLanguageAfterConversion) "`r`n"
     text .= "`r`n"
     text .= "Live-режим рассчитан на короткие фрагменты во время набора. Для больших выделений используйте Layout Fix.`r`n"
 
@@ -371,7 +398,9 @@ SettingsGui_ApplyPageLayout(pageName) {
         return
     }
 
-    if (pageName = "Live") {
+    if (pageName = "General") {
+        g_SettingsContentBody.Move(180, 48, 560, 295)
+    } else if (pageName = "Live") {
         g_SettingsContentBody.Move(180, 48, 560, 205)
     } else if (pageName = "Hotkeys") {
         g_SettingsContentBody.Move(180, 48, 560, 48)
@@ -384,7 +413,7 @@ SettingsGui_ApplyPageLayout(pageName) {
 
 SettingsGui_SetLiveControlsVisible(visible) {
     global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceLabel, g_SettingsLiveDoubleSpaceEdit
-    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
+    global g_SettingsLiveDoubleSpaceHint, g_SettingsLiveHintChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
 
     controls := [
@@ -394,8 +423,7 @@ SettingsGui_SetLiveControlsVisible(visible) {
         g_SettingsLiveDoubleSpaceLabel,
         g_SettingsLiveDoubleSpaceEdit,
         g_SettingsLiveDoubleSpaceHint,
-        g_SettingsLiveHintChk,
-        g_SettingsLiveSwitchLanguageChk
+        g_SettingsLiveHintChk
     ]
 
     for _, ctrl in controls {
@@ -431,9 +459,9 @@ SettingsGui_UpdateLiveTriggerControlVisibility() {
 
 
 SettingsGui_UpdateLiveControls() {
-    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
+    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
-    global g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint
+    global g_LiveEnabled, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint
     global g_HotkeyLiveConvert
 
     if IsObject(g_SettingsLiveEnabledChk) {
@@ -457,24 +485,31 @@ SettingsGui_UpdateLiveControls() {
         g_SettingsLiveHintChk.Value := g_ShowFirstToggleHint ? 1 : 0
     }
 
-    if IsObject(g_SettingsLiveSwitchLanguageChk) {
-        g_SettingsLiveSwitchLanguageChk.Value := g_LiveSwitchInputLanguage ? 1 : 0
-    }
-
     SettingsGui_UpdateLiveTriggerControlVisibility()
 }
 
 
+SettingsGui_SaveGeneralSettings() {
+    global g_SettingsSwitchLanguageChk, g_AppName
+    try {
+        LTWebSettings.SaveGeneral(Map("switchInputLanguage", g_SettingsSwitchLanguageChk.Value = 1))
+        SettingsGui_ShowPage("General")
+        Notify("Настройки сохранены", g_AppName, "Iconi")
+    } catch as err {
+        Notify(err.Message, g_AppName, "Icon!")
+    }
+}
+
+
 SettingsGui_SaveLiveSettings() {
-    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk, g_SettingsLiveSwitchLanguageChk
+    global g_SettingsLiveEnabledChk, g_SettingsLiveDoubleSpaceEdit, g_SettingsLiveHintChk
     global g_SettingsLiveSpaceRadio, g_SettingsLiveHotkeyRadio
-    global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_LiveSwitchInputLanguage, g_ShowFirstToggleHint, g_AppName
+    global g_ConfigPath, g_LiveTriggerMode, g_DoubleSpaceMs, g_ShowFirstToggleHint, g_AppName
     global g_LiveBusy
 
     if (!IsObject(g_SettingsLiveEnabledChk)
      || !IsObject(g_SettingsLiveDoubleSpaceEdit)
      || !IsObject(g_SettingsLiveHintChk)
-     || !IsObject(g_SettingsLiveSwitchLanguageChk)
      || !IsObject(g_SettingsLiveSpaceRadio)
      || !IsObject(g_SettingsLiveHotkeyRadio)) {
         return
@@ -500,22 +535,17 @@ SettingsGui_SaveLiveSettings() {
     }
 
     oldTriggerMode := g_LiveTriggerMode
-    oldSwitchInputLanguage := g_LiveSwitchInputLanguage
     g_LiveTriggerMode := newTriggerMode
     g_DoubleSpaceMs := newDoubleSpaceMs
-    g_LiveSwitchInputLanguage := g_SettingsLiveSwitchLanguageChk.Value = 1
     g_ShowFirstToggleHint := g_SettingsLiveHintChk.Value = 1
 
     IniWrite(g_LiveTriggerMode, g_ConfigPath, "General", "LiveTriggerMode")
     IniWrite(String(g_DoubleSpaceMs), g_ConfigPath, "General", "DoubleSpaceMs")
-    IniWrite(g_LiveSwitchInputLanguage ? "1" : "0", g_ConfigPath, "General", "LiveSwitchInputLanguage")
     IniWrite(g_ShowFirstToggleHint ? "1" : "0", g_ConfigPath, "General", "ShowFirstToggleHint")
 
     if !SetLiveMode(g_SettingsLiveEnabledChk.Value = 1, false, true) {
         g_LiveTriggerMode := oldTriggerMode
-        g_LiveSwitchInputLanguage := oldSwitchInputLanguage
         IniWrite(g_LiveTriggerMode, g_ConfigPath, "General", "LiveTriggerMode")
-        IniWrite(g_LiveSwitchInputLanguage ? "1" : "0", g_ConfigPath, "General", "LiveSwitchInputLanguage")
         UpdateLiveConvertHotkeyRegistration()
         SettingsGui_UpdateLiveControls()
         return
@@ -1021,8 +1051,31 @@ SettingsGui_GetAboutText() {
     text .= "Исправляет текст, набранный в неверной RU/EN-раскладке, приводит в порядок случайный CapsLock и помогает вводить Unicode-символы по HEX-коду.`r`n"
     text .= "`r`n"
     text .= "Работает в фоне и не требует отдельного окна.`r`n"
+    text .= "`r`nПроект на GitHub:`r`n" SettingsGui_GetProjectUrl() "`r`n"
+    text .= "Сайт: Coming soon...`r`n"
 
     return text
+}
+
+SettingsGui_GetInstallationText() {
+    status := LTInstall_Status()
+    text := "Папка программы:`r`n" status["path"] "`r`n`r`n"
+    text .= "Автозагрузка этой копии: " SettingsGui_OnOff(status["autostart"]) "`r`n"
+    if status["autostartConflict"]
+        text .= "Обнаружен ярлык другой копии. Не изменяйте его без проверки.`r`n"
+    text .= "`r`n"
+    text .= "Версия программы: " status["installedVersion"] "`r`n"
+    if status["updateMessage"] != ""
+        text .= status["updateMessage"] "`r`n"
+    return text
+}
+
+SettingsGui_GetProjectUrl() {
+    return "https://github.com/le-h4ut/layout-toolkit-ru-en"
+}
+
+SettingsGui_OpenProject() {
+    Run(SettingsGui_GetProjectUrl())
 }
 
 
@@ -1042,7 +1095,7 @@ SettingsGui_GetVersionFromChangelog() {
     for line in StrSplit(text, "`n", "`r") {
         line := Trim(line)
 
-        if RegExMatch(line, "^##\s+\[([^\]]+)\]", &match) {
+        if RegExMatch(line, "^##\s+\[([^\]]+)\]", &match) && StrLower(match[1]) != "unreleased" {
             return match[1]
         }
     }
@@ -1068,6 +1121,7 @@ SettingsGui_SetActionButton(btn, label) {
     if !IsObject(btn) {
         return
     }
+    btn.Enabled := true
 
     if (label = "") {
         btn.Text := ""
@@ -1103,11 +1157,19 @@ SettingsGui_ActionButton3(*) {
 
 SettingsGui_RunAction(actionName) {
     switch actionName {
+        case "OpenProject":
+            try SettingsGui_OpenProject()
+            catch as err
+                Notify("Не удалось открыть GitHub: " err.Message, "Layout Toolkit", "Iconx")
+
         case "OpenDataDir":
             OpenUserDataDir()
 
         case "RestartToolkit":
             SettingsGui_RestartToolkit()
+
+        case "SaveGeneralSettings":
+            SettingsGui_SaveGeneralSettings()
 
         case "SaveLiveSettings":
             SettingsGui_SaveLiveSettings()
@@ -1131,6 +1193,29 @@ SettingsGui_RunAction(actionName) {
 
         case "OpenExcludeFile":
             OpenExcludeFile()
+
+        case "OpenInstallFolder":
+            LTInstall_OpenFolder()
+
+        case "ToggleAutostart":
+            try {
+                status := LTInstall_Status()
+                LTInstall_SetAutostart(!status["autostart"])
+                SettingsGui_ShowPage("Installation")
+            } catch as err {
+                MsgBox(err.Message, "Layout Toolkit", "Iconx")
+            }
+
+        case "CheckUpdates":
+            try {
+                result := LTInstall_CheckUpdate()
+                if result["available"]
+                    LTInstall_StartUpdate(result["version"])
+                else
+                    MsgBox(result["message"], "Layout Toolkit", "Iconi")
+            } catch as err {
+                MsgBox(err.Message, "Layout Toolkit", "Iconx")
+            }
 
         case "ReloadExcludeWords":
             ReloadExcludeWords()

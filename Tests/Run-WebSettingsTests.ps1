@@ -12,10 +12,20 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $testDir = Join-Path ([IO.Path]::GetTempPath()) ('lt-web-settings-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDir | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $testDir 'TestInstallState') | Out-Null
 # Isolated runtime: no access to the real profile, no global hotkey registration,
 # no input synthesis or clipboard usage. Production UI and save handlers are used.
 Copy-Item -LiteralPath (Join-Path $repoRoot 'Modules'), (Join-Path $repoRoot 'Assets') -Destination $testDir -Recurse
+$debugModePath = Join-Path $testDir 'Assets\DebugUIView.mode'
+if (Test-Path -LiteralPath $debugModePath) { Remove-Item -LiteralPath $debugModePath -Force }
 Copy-Item -LiteralPath (Join-Path $repoRoot 'CHANGELOG.md') -Destination $testDir
+Copy-Item -LiteralPath (Join-Path $repoRoot 'latest.json') -Destination $testDir
+Copy-Item -LiteralPath (Join-Path $repoRoot 'install.ps1'), (Join-Path $repoRoot 'Run_Layout_Toolkit.cmd') -Destination $testDir
+$installationPath = Join-Path $testDir 'Modules\InstallationSettings.ahk'
+$installation = Get-Content -Raw -LiteralPath $installationPath
+$installation = $installation.Replace('manifest := LTInstall_FetchManifest()', 'manifest := WebTest_FetchUpdateManifest()')
+$installation = $installation.Replace('return EnvGet("LOCALAPPDATA") "\Layout Toolkit\install.json"', 'return A_ScriptDir "\TestInstallState\install.json"')
+[IO.File]::WriteAllText($installationPath, $installation, [Text.UTF8Encoding]::new($true))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'WebSettings.BrowserTests.js') -Destination $testDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'WebUnicode.BrowserTests.js') -Destination $testDir
 $source = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'Layout_Toolkit_RU_EN.ahk')
@@ -38,6 +48,10 @@ $webPath = Join-Path $testDir 'Modules\WebSettings.ahk'
 $web = Get-Content -Raw -LiteralPath $webPath
 $web = $web.Replace('EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2"', 'A_ScriptDir "\WebView2Profile"')
 [IO.File]::WriteAllText($webPath, $web, [Text.UTF8Encoding]::new($true))
+$nativeSettingsPath = Join-Path $testDir 'Modules\SettingsGui.ahk'
+$nativeSettings = Get-Content -Raw -LiteralPath $nativeSettingsPath
+$nativeSettings = $nativeSettings.Replace('Run(SettingsGui_GetProjectUrl())', 'WebTest_RecordProjectOpen(SettingsGui_GetProjectUrl())')
+[IO.File]::WriteAllText($nativeSettingsPath, $nativeSettings, [Text.UTF8Encoding]::new($true))
 $unicodeWebPath = Join-Path $testDir 'Modules\WebUnicodeInput.ahk'
 $unicodeWeb = Get-Content -Raw -LiteralPath $unicodeWebPath
 $unicodeWeb = $unicodeWeb.Replace('EnvGet("LOCALAPPDATA") "\Layout Toolkit\WebView2\UnicodeInput"', 'A_ScriptDir "\WebView2UnicodeProfile"')
@@ -61,6 +75,7 @@ if ($UnicodeBrowserTests) {
 $stderr = Join-Path $testDir 'stderr.txt'
 $stdout = Join-Path $testDir 'stdout.txt'
 $process = Start-Process -FilePath $AutoHotkeyPath -ArgumentList @('/ErrorStdOut=UTF-8', ('"' + $entryPath + '"')) -WindowStyle Hidden -RedirectStandardError $stderr -RedirectStandardOutput $stdout -PassThru
+$null = $process.Handle
 if ($Preview -or $UnicodePreview) {
     Write-Output "Preview PID: $($process.Id)"
     Write-Output "Isolated fixture: $testDir"
@@ -70,6 +85,7 @@ if (!$process.WaitForExit(45000)) {
     Stop-Process -Id $process.Id
     throw "Tests timed out. Logs: $testDir"
 }
+$process.Refresh()
 Get-Content -LiteralPath $stdout
-if ($process.ExitCode -ne 0) { throw (Get-Content -Raw -LiteralPath $stderr) }
+if ($process.ExitCode -ne 0) { throw "AutoHotkey test exited with code $($process.ExitCode): $(Get-Content -Raw -LiteralPath $stderr)" }
 Write-Output "Isolated test files retained at: $testDir"

@@ -17,14 +17,14 @@ Powered by **AutoHotkey v2**.
 - CapsLock Full Fix: invert the case of every RU/EN letter.
 - CapsLock Fix: normalize accidental CapsLock case with smart analysis.
 - Settings GUI with hotkeys, exclusions and live-mode settings.
-- Local web settings with light and dark themes hosted in WebView2 (development version).
+- Local web settings with light and dark themes hosted in WebView2.
 - User files stored in `Documents\Layout Toolkit`.
 
 ---
 
 ## Web settings / Веб-настройки
 
-The Git version uses a local HTML/CSS/JavaScript settings window hosted in
+Version 1.5.0 uses a local HTML/CSS/JavaScript settings window hosted in
 Microsoft Edge WebView2. This is not a website: no HTTP server or internet connection
 is needed for the interface. AutoHotkey still handles conversion and Windows input.
 The settings window, Unicode Input and quick-start guide use the web UI.
@@ -57,7 +57,7 @@ application settings remain in `Documents\Layout Toolkit`.
 When packaging Windows builds, include `Assets\WebSettings`, `Assets\WebUnicodeInput`,
 `Assets\WebWelcome` and `Modules\Vendor`
 in addition to the existing runtime files. Dependency licenses are documented in
-`Modules\Vendor\README.md`. Do not include `Tests` or Linux files in Windows ZIPs.
+`Modules\Vendor\README.md`. Do not include `Tests`, `Design` or Linux files in Windows ZIPs.
 
 Developer checks, with AutoHotkey v2 installed:
 
@@ -69,6 +69,8 @@ Developer checks, with AutoHotkey v2 installed:
 .\Tests\Run-WebSettingsTests.ps1 -UnicodeBrowserTests
 .\Tests\Run-WebSettingsTests.ps1 -PrewarmTests
 .\Tests\Install.Tests.ps1
+.\Tests\Install.Transaction.Tests.ps1
+.\Tests\HealthCheck.Tests.ps1
 .\Tests\Run-LiveInputLanguageTests.ps1
 .\Tests\Run-LiveInputLanguageTests.ps1 -RealInput
 .\Tests\Run-WebSettingsTests.ps1 -Preview
@@ -117,6 +119,46 @@ If AutoHotkey v2 is not found, it explains why AHK is required and lets you eith
 * cancel the launch.
 
 The selected executable is remembered in `%LocalAppData%\Layout Toolkit\autohotkey-path.txt`.
+
+The **Installation / Установка** settings page shows the current program folder,
+manages this copy's startup shortcut and checks for updates. In-app updates work
+for managed and manually extracted copies when `install.ps1` and the launcher
+are present. The first successful update registers the current folder in
+`install.json`; Git checkouts remain protected from in-app replacement.
+Windows release archives must include
+both `install.ps1` and `Manage_Startup.ps1` with the other Windows files.
+
+Safe updates verify the ZIP's size and SHA-256 against `latest.json`, then run
+`--health-check` before replacing any installed files. The probe checks required
+assets and core conversion/Unicode/JSON routines without initializing the user
+profile, hotkeys or WebView2. The installer refuses older archives which do not
+support this protocol; published beta archives remain unchanged.
+
+The replacement is staged on the destination drive, including when Windows TEMP
+is on a different drive. The old directory remains as a backup until the new
+process confirms initialization and hotkey registration. Failed startup or state/
+shortcut writes restore the old directory and exact installation metadata.
+If rollback itself fails, recovery files are retained and their paths are reported.
+An update started from settings waits for the previous process to exit and restarts
+the old copy after a recoverable failure. For a manual update, close Toolkit first.
+This is a startup check, not a guarantee against a later application crash.
+
+Developer probe (AutoHotkey v2; no running copy is replaced):
+
+```powershell
+& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /force /ErrorStdOut=UTF-8 .\Layout_Toolkit_RU_EN.ahk --health-check
+```
+
+Success prints `LAYOUT_TOOLKIT_HEALTH_OK` and returns exit code 0. To exercise
+cross-drive replacement, run `Tests\Install.Transaction.Tests.ps1 -TargetRoot`
+with a directory on another drive. Tests use disposable fixtures, not the real
+installation or startup folder.
+
+For UI comparison in a source checkout, run `Assets\DebugUIView.ps1` from
+PowerShell with `-Mode Native` or `-Mode Web` (or omit `-Mode` for a menu).
+Close and reopen the settings or Unicode Input window to apply the choice;
+the running app does not need a restart. The copy-local debug marker is ignored
+by Git, and WebView2 remains the default when no marker exists.
 
 ---
 
@@ -194,6 +236,21 @@ becomes:
 Live mode sends synthetic `Backspace` and Unicode text input, so it is best for messengers, search fields and short input fields.
 
 For long documents, use selected-text conversion instead.
+
+### Automatic input-language switching
+
+In **Обзор**, enable **Переключать раскладку после исправления** to apply the
+same optional behavior to Live, Full and Majority. It is off by default;
+the preference from the older Live-only setting is preserved automatically.
+
+After replacement, EN → RU requests an installed Russian layout, and RU → EN
+requests an installed English layout (not necessarily US English). Full only
+switches when the changed letters have one conversion direction; preserved
+exceptions do not determine that direction. Majority follows its target language.
+Unchanged text and ambiguous Full conversions do not switch the input language.
+If the target window or focused field changes, no request is sent to another field.
+Some applications may ignore Windows input-language requests; this does not undo
+the completed conversion.
 
 ### Unicode Input
 

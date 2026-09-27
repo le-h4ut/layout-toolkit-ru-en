@@ -9,6 +9,10 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [switch]$NoAutostart,
 
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateRange(0, 2147483647)]
+    [int]$WaitForPid = 0,
+
     [Parameter(Mandatory, ParameterSetName = 'Uninstall')]
     [switch]$Uninstall
 )
@@ -128,6 +132,10 @@ function Remove-LegacyStartupShortcut {
 
 function Assert-SafeExistingInstall([string]$TargetPath) {
     if (!(Test-Path -LiteralPath $TargetPath)) { return }
+    $directory = Get-Item -LiteralPath $TargetPath -Force
+    if (!$directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Папка установки не должна быть файлом или символической ссылкой.'
+    }
     if (Test-Path -LiteralPath (Join-Path $TargetPath '.git')) {
         throw 'Нельзя устанавливать обновление поверх Git-репозитория.'
     }
@@ -149,111 +157,341 @@ function Set-StartupShortcut([string]$TargetPath) {
     $shortcut.Save()
 }
 
-$state = Read-InstallState
-$legacyInstallPath = if ($null -eq $state) { Find-LegacyInstall } else { $null }
-$detectedInstallPath = if ($state -and $state.installPath) { [string]$state.installPath } else { $legacyInstallPath }
-$usingLegacyInstall = $null -eq $state -and
-                      ![string]::IsNullOrWhiteSpace($legacyInstallPath) -and
-                      [string]::IsNullOrWhiteSpace($InstallPath)
-
-if ($Uninstall) {
-    $target = Resolve-InstallPath $InstallPath $detectedInstallPath $true
-    Assert-SafeExistingInstall $target
-    Remove-StartupShortcut
-    if ($usingLegacyInstall) { Remove-LegacyStartupShortcut }
-    if (Test-Path -LiteralPath $target) {
-        try { Remove-Item -LiteralPath $target -Recurse -Force }
-        catch { throw "Не удалось удалить $target. Закройте Layout Toolkit и повторите команду удаления." }
+function Wait-PreviousInstance([string]$SourcePath, [int]$ProcessId) {
+    if ($ProcessId -gt 0) {
+        $previous = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($previous -and !$previous.WaitForExit(15000)) {
+            throw 'Предыдущая копия Layout Toolkit не закрылась. Закройте её и повторите обновление.'
+        }
     }
-    if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
-    Write-Host 'Layout Toolkit удалён. Пользовательские файлы в Documents\Layout Toolkit сохранены.' -ForegroundColor Green
-    return
+    if (!(Test-InstallDirectory $SourcePath)) { return }
+    $main = Join-Path $SourcePath 'Layout_Toolkit_RU_EN.ahk'
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    } catch {
+        throw 'Не удалось проверить запущенные копии Layout Toolkit. Обновление остановлено до замены файлов.'
+    }
+    $quoted = '"' + $main + '"'
+    $unquotedPattern = '(?i)(?:^|\s)' + [regex]::Escape($main) + '(?:\s|$)'
+    foreach ($item in $processes) {
+        if ($item.CommandLine -and ($item.CommandLine.IndexOf($quoted, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $item.CommandLine -match $unquotedPattern)) {
+            throw 'Эта копия Layout Toolkit ещё запущена. Закройте её и повторите обновление.'
+        }
+    }
 }
 
-$sourceTarget = Resolve-InstallPath $InstallPath $detectedInstallPath ([bool]$Update)
-if ([string]::IsNullOrWhiteSpace($sourceTarget)) {
-    Write-Host 'Установка отменена. Изменения не вносились.' -ForegroundColor Yellow
-    return
-}
-$target = if ($Update) { Get-CanonicalUpdatePath $sourceTarget } else { $sourceTarget }
-
-# Релизы 1.4.1 и 1.5.0-beta.1 могли быть распакованы в папку с опечаткой
-# Toolkir. При обновлении источник остаётся старым путём, а новая версия
-# устанавливается по исправленному пути. Rollback возвращает старое имя.
-if ($Update) { $sourceTarget = Resolve-UpdateSourcePath $sourceTarget $target }
-Assert-SafeExistingInstall $sourceTarget
-Assert-CanonicalUpdateDestination $sourceTarget $target
-$manifest = Invoke-RestMethod -Uri $manifestUrl
-if ($manifest.schema_version -ne 1) { throw "Неподдерживаемая версия latest.json: $($manifest.schema_version)" }
-$asset = $manifest.assets.windows
-if (!$asset.url -or !$asset.sha256 -or !$asset.size) { throw 'latest.json не содержит полного описания Windows-архива.' }
-
-$workDir = Join-Path ([IO.Path]::GetTempPath()) ('layout-toolkit-install-' + [guid]::NewGuid().ToString('N'))
-$archivePath = Join-Path $workDir 'LayoutToolkit.zip'
-$extractPath = Join-Path $workDir 'extracted'
-$backupPath = $sourceTarget + '.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-$previousMoved = $false
-$previousState = if (Test-Path -LiteralPath $statePath) { Get-Content -Raw -LiteralPath $statePath } else { $null }
-
-try {
-    New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-    Write-Host "Скачивание Layout Toolkit $($manifest.version)..."
-    Invoke-WebRequest -Uri $asset.url -OutFile $archivePath
-    $file = Get-Item -LiteralPath $archivePath
-    if ($file.Length -ne [int64]$asset.size) { throw "Размер архива не совпал: получено $($file.Length), ожидалось $($asset.size)." }
-    $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
-    if ($actualHash -ne ([string]$asset.sha256).ToUpperInvariant()) { throw 'SHA-256 архива не совпал. Установка остановлена.' }
-
-    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
-    $mainScript = Get-ChildItem -LiteralPath $extractPath -Filter 'Layout_Toolkit_RU_EN.ahk' -File -Recurse | Select-Object -First 1
-    if (!$mainScript) { throw 'В архиве не найден Layout_Toolkit_RU_EN.ahk.' }
-    $payloadPath = $mainScript.Directory.FullName
-
-    if (Test-Path -LiteralPath $sourceTarget) {
-        if (Test-Path -LiteralPath $backupPath) { throw "Резервная папка уже существует: $backupPath" }
-        try { Move-Item -LiteralPath $sourceTarget -Destination $backupPath }
-        catch { throw "Не удалось подготовить обновление. Закройте Layout Toolkit и повторите команду.`n$($_.Exception.Message)" }
-        $previousMoved = $true
+function Resolve-InstallRuntime([string]$PayloadPath, [string]$WorkDir) {
+    $resolver = Join-Path $PayloadPath 'Resolve_AutoHotkey.ps1'
+    if (!(Test-Path -LiteralPath $resolver -PathType Leaf)) { throw 'В релизе отсутствует Resolve_AutoHotkey.ps1.' }
+    $cache = Join-Path $WorkDir 'autohotkey-path.txt'
+    $oldCache = Join-Path $stateDir 'autohotkey-path.txt'
+    if (Test-Path -LiteralPath $oldCache -PathType Leaf) { Copy-Item -LiteralPath $oldCache -Destination $cache }
+    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $resolver -Action Resolve -CachePath $cache
+    if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $cache -PathType Leaf)) {
+        throw 'AutoHotkey v2 не найден или его выбор отменён. Файлы установки не изменены.'
     }
+    $runtime = ([IO.File]::ReadAllText($cache)).Trim()
+    if (!(Test-Path -LiteralPath $runtime -PathType Leaf)) { throw 'Путь AutoHotkey v2 недоступен.' }
+    return $runtime
+}
 
-    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-    Move-Item -LiteralPath $payloadPath -Destination $target
+function Stop-OwnedProcess($Process) {
+    if ($null -ne $Process -and !$Process.HasExited) {
+        $Process.Kill()
+        if (!$Process.WaitForExit(5000)) { throw 'Не удалось остановить проверяемый процесс.' }
+    }
+}
 
+function Invoke-ReleaseHealthCheck([string]$Runtime, [string]$PayloadPath, [string]$WorkDir, [int]$TimeoutMs = 15000) {
+    $stdout = Join-Path $WorkDir 'health.stdout.txt'
+    $stderr = Join-Path $WorkDir 'health.stderr.txt'
+    $main = Join-Path $PayloadPath 'Layout_Toolkit_RU_EN.ahk'
+    $warningDirective = Join-Path $WorkDir 'health-warnings.ahk'
+    [IO.File]::WriteAllText($warningDirective, "#Warn VarUnset, StdOut`n#Warn Unreachable, StdOut`n", [Text.UTF8Encoding]::new($true))
+    # /force disables single-instance replacement for this short-lived probe.
+    $process = Start-Process -FilePath $Runtime -ArgumentList ('/force /ErrorStdOut=UTF-8 /include "{0}" "{1}" --health-check' -f $warningDirective, $main) -WorkingDirectory $PayloadPath -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $null = $process.Handle
+    try {
+        if (!$process.WaitForExit($TimeoutMs)) { throw 'Проверка релиза не завершилась вовремя.' }
+        $process.Refresh()
+        $outputText = [IO.File]::ReadAllText($stdout, [Text.Encoding]::UTF8).Trim()
+        $errorText = [IO.File]::ReadAllText($stderr, [Text.Encoding]::UTF8).Trim()
+        if ($process.ExitCode -ne 0 -or $outputText -ne 'LAYOUT_TOOLKIT_HEALTH_OK' -or $errorText) {
+            throw "Новая версия не прошла --health-check (код $($process.ExitCode)). $outputText $errorText"
+        }
+    } finally {
+        Stop-OwnedProcess $process
+    }
+}
+
+function Assert-ReleaseHealthProtocol([string]$PayloadPath) {
+    $main = Join-Path $PayloadPath 'Layout_Toolkit_RU_EN.ahk'
+    if (!(Test-Path -LiteralPath (Join-Path $PayloadPath 'Modules\HealthCheck.ahk') -PathType Leaf) -or
+        ([IO.File]::ReadAllText($main) -notmatch 'LTHealth_Run\(\)')) {
+        throw 'Этот релиз не поддерживает безопасную проверку запуска. Установка остановлена; используйте совместимый релиз 1.5.0 или установите старую beta вручную.'
+    }
+}
+
+function Start-ValidatedLayoutToolkit([string]$Runtime, [string]$TargetPath, [string]$WorkDir, [int]$TimeoutMs = 15000) {
+    $readyPath = Join-Path $WorkDir 'startup-ready.json'
+    if (Test-Path -LiteralPath $readyPath) { Remove-Item -LiteralPath $readyPath -Force }
+    $token = [guid]::NewGuid().ToString('N')
+    $main = Join-Path $TargetPath 'Layout_Toolkit_RU_EN.ahk'
+    $process = Start-Process -FilePath $Runtime -ArgumentList ('/ErrorStdOut=UTF-8 "{0}" --ready-file "{1}" --ready-token {2}' -f $main, $readyPath, $token) -WorkingDirectory $TargetPath -WindowStyle Hidden -PassThru
+    $null = $process.Handle
+    try {
+        $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+                $report = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
+                if ($report.protocol -ne 1 -or $report.token -cne $token -or $report.pid -ne $process.Id -or $report.scriptPath -ine $main) {
+                    throw 'Новая версия вернула неверный ответ проверки запуска.'
+                }
+                if (!$report.ready) { throw "Новая версия не смогла запуститься: $($report.error)" }
+                Start-Sleep -Milliseconds 500
+                if ($process.HasExited) { throw 'Новая версия завершилась сразу после проверки запуска.' }
+                return $process
+            }
+            if ($process.HasExited) { throw "Новая версия завершилась при запуске (код $($process.ExitCode))." }
+            Start-Sleep -Milliseconds 50
+        }
+        throw 'Новая версия не подтвердила готовность вовремя.'
+    } catch {
+        $failure = $_.Exception
+        try { Stop-OwnedProcess $process }
+        catch {
+            $stopFailure = [Exception]::new("Ошибка запуска: $($failure.Message). Не удалось остановить новый процесс: $($_.Exception.Message)", $failure)
+            $stopFailure.Data['StartupProcess'] = $process
+            throw $stopFailure
+        }
+        throw $failure
+    }
+}
+
+function Test-OwnedStartupShortcut([string]$LinkPath, [string[]]$InstallPaths) {
+    if (!(Test-Path -LiteralPath $LinkPath -PathType Leaf)) { return $false }
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($LinkPath)
+    foreach ($path in $InstallPaths) {
+        $main = Join-Path $path 'Layout_Toolkit_RU_EN.ahk'
+        if ($link.TargetPath -ieq (Join-Path $path 'Run_Layout_Toolkit.cmd') -or $link.TargetPath -ieq $main) { return $true }
+        if ($link.TargetPath -match '(?i)\\(?:powershell|autohotkey(?:64|32)?)\.exe$' -and
+            $link.Arguments.IndexOf(('"' + $main + '"'), [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    }
+    return $false
+}
+
+function Save-InstallMetadataBackup([string]$WorkDir) {
+    $snapshot = @()
+    $index = 0
+    foreach ($path in @($statePath, $startupPath, $legacyStartupPath, (Join-Path $stateDir 'autohotkey-path.txt'))) {
+        $backup = Join-Path $WorkDir ('metadata-' + $index + '.bak')
+        $exists = Test-Path -LiteralPath $path -PathType Leaf
+        if ($exists) { Copy-Item -LiteralPath $path -Destination $backup }
+        $snapshot += [pscustomobject]@{ Path = $path; Backup = $backup; Existed = $exists }
+        $index++
+    }
+    return $snapshot
+}
+
+function Restore-InstallMetadataBackup($Snapshot) {
+    foreach ($item in $Snapshot) {
+        if ($item.Existed) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $item.Path) -Force | Out-Null
+            Copy-Item -LiteralPath $item.Backup -Destination $item.Path -Force
+        } elseif (Test-Path -LiteralPath $item.Path -PathType Leaf) {
+            Remove-Item -LiteralPath $item.Path -Force
+        }
+    }
+}
+
+function Write-InstallStateAtomic($Value) {
     New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-    $now = (Get-Date).ToUniversalTime().ToString('o')
-    $installedAt = if ($state -and $state.installedAt) { [string]$state.installedAt } else { $now }
-    [ordered]@{
-        schemaVersion = 1
-        installPath = $target
-        installedVersion = [string]$manifest.version
-        channel = [string]$manifest.channel
-        installedAt = $installedAt
-        updatedAt = $now
-        autostart = !$NoAutostart
-    } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-
-    if ($NoAutostart) {
-        Remove-StartupShortcut
-    } else {
-        Set-StartupShortcut $target
+    $temporary = Join-Path $stateDir ('install-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $replaced = $temporary + '.old'
+    try {
+        [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $statePath -PathType Leaf) { [IO.File]::Replace($temporary, $statePath, $replaced) }
+        else { [IO.File]::Move($temporary, $statePath) }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        if (Test-Path -LiteralPath $replaced) { Remove-Item -LiteralPath $replaced -Force }
     }
-    Write-Host "Layout Toolkit $($manifest.version) установлен в $target" -ForegroundColor Green
-    Start-Process -FilePath (Join-Path $target 'Run_Layout_Toolkit.cmd') -WorkingDirectory $target
-    if ($usingLegacyInstall) { Remove-LegacyStartupShortcut }
-    if ($previousMoved -and (Test-Path -LiteralPath $backupPath)) { Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction SilentlyContinue }
-} catch {
-    if ($usingLegacyInstall) { Remove-StartupShortcut }
-    if ($previousMoved -and (Test-Path -LiteralPath $backupPath)) {
-        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue }
-        if (!(Test-Path -LiteralPath $sourceTarget)) { Move-Item -LiteralPath $backupPath -Destination $sourceTarget }
-    }
-    if ($null -ne $previousState) {
-        New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-        Set-Content -LiteralPath $statePath -Value $previousState -Encoding UTF8
-    } elseif (Test-Path -LiteralPath $statePath) {
-        Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
-    }
-    throw
-} finally {
-    if (Test-Path -LiteralPath $workDir) { Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue }
 }
+
+function Invoke-InstallTransaction([string]$PayloadPath, [string]$SourcePath, [string]$TargetPath, [string]$Runtime, [string]$WorkDir, $Manifest, [bool]$DisableAutostart) {
+    $SourcePath = Resolve-InstallPath $SourcePath '' $false
+    $TargetPath = Resolve-InstallPath $TargetPath '' $false
+    if ($TargetPath -ine $SourcePath -and $TargetPath -ine (Get-CanonicalUpdatePath $SourcePath)) { throw 'Небезопасный путь обновления.' }
+    Assert-SafeExistingInstall $SourcePath
+    Assert-CanonicalUpdateDestination $SourcePath $TargetPath
+    $ownedStartup = Test-OwnedStartupShortcut $startupPath @($SourcePath, $TargetPath)
+    $ownedLegacy = Test-OwnedStartupShortcut $legacyStartupPath @($SourcePath, $TargetPath)
+    if (!$DisableAutostart -and (Test-Path -LiteralPath $startupPath) -and !$ownedStartup) {
+        throw 'Ярлык автозагрузки принадлежит другой копии. Обновление не будет заменять его.'
+    }
+    $snapshot = @(Save-InstallMetadataBackup $WorkDir)
+    $previousState = Read-InstallState
+    $backupPath = $SourcePath + '.backup-' + [guid]::NewGuid().ToString('N')
+    # Stage beside the destination: TEMP and the installation may be on different volumes.
+    $stagePath = Join-Path (Split-Path -Parent $TargetPath) ('.layout-toolkit-staging-' + [guid]::NewGuid().ToString('N'))
+    $previousMoved = $false
+    $newInstalled = $false
+    $stageOwned = $false
+    $rollbackIncomplete = $false
+    $started = $null
+    try {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $TargetPath) -Force | Out-Null
+        New-Item -ItemType Directory -Path $stagePath | Out-Null
+        $stageOwned = $true
+        foreach ($entry in Get-ChildItem -LiteralPath $PayloadPath -Force) {
+            Copy-Item -LiteralPath $entry.FullName -Destination $stagePath -Recurse
+        }
+        if (Test-Path -LiteralPath $SourcePath) {
+            [IO.Directory]::Move($SourcePath, $backupPath)
+            $previousMoved = $true
+        }
+        # Directory.Move fails instead of nesting the payload into an unexpected existing directory.
+        [IO.Directory]::Move($stagePath, $TargetPath)
+        $newInstalled = $true
+        $started = Start-ValidatedLayoutToolkit $Runtime $TargetPath $WorkDir
+        $now = [DateTime]::UtcNow.ToString('o')
+        $installedAt = if ($previousState -and $previousState.PSObject.Properties['installedAt']) { [string]$previousState.installedAt } else { $now }
+        Write-InstallStateAtomic ([ordered]@{
+            schemaVersion = 1; installPath = $TargetPath; installedVersion = [string]$Manifest.version
+            channel = [string]$Manifest.channel; installedAt = $installedAt; updatedAt = $now
+            autostart = !$DisableAutostart
+        })
+        [IO.File]::WriteAllText((Join-Path $stateDir 'autohotkey-path.txt'), $Runtime, [Text.UTF8Encoding]::new($false))
+        if ($DisableAutostart) { if ($ownedStartup) { Remove-StartupShortcut } }
+        else { Set-StartupShortcut $TargetPath }
+        if ($ownedLegacy) { Remove-LegacyStartupShortcut }
+    } catch {
+        $failure = $_.Exception
+        if ($failure.Data.Contains('StartupProcess')) { $started = $failure.Data['StartupProcess'] }
+        try {
+            Stop-OwnedProcess $started
+            if ($newInstalled -and (Test-Path -LiteralPath $TargetPath)) {
+                [IO.Directory]::Move($TargetPath, $stagePath)
+            }
+            if ($previousMoved) { [IO.Directory]::Move($backupPath, $SourcePath) }
+            Restore-InstallMetadataBackup $snapshot
+            $failure.Data['RollbackComplete'] = $true
+        } catch {
+            $rollbackIncomplete = $true
+            $recovery = [Exception]::new("Обновление не удалось: $($failure.Message). Автоматический откат не завершён: $($_.Exception.Message). Сохранены backup: $backupPath, staging: $stagePath и служебные файлы: $WorkDir", $failure)
+            $recovery.Data['RollbackComplete'] = $false
+            throw $recovery
+        }
+        throw $failure
+    } finally {
+        if ($stageOwned -and !$rollbackIncomplete -and (Test-Path -LiteralPath $stagePath)) {
+            try { Remove-Item -LiteralPath $stagePath -Recurse -Force }
+            catch { Write-Warning "Не удалось удалить служебную папку: $stagePath" }
+        }
+    }
+    # Commit is complete. Cleanup failure must not undo a working installation.
+    if ($previousMoved -and (Test-Path -LiteralPath $backupPath)) {
+        try { Remove-Item -LiteralPath $backupPath -Recurse -Force }
+        catch { Write-Warning "Обновление завершено. Старый backup пока не удалось удалить: $backupPath" }
+    }
+    Write-Host "Layout Toolkit $($Manifest.version) установлен в $TargetPath" -ForegroundColor Green
+}
+
+function Invoke-InstallerMain {
+    $mutexName = 'Local\LayoutToolkitInstaller-' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $mutex = New-Object Threading.Mutex($false, $mutexName)
+    $locked = $false
+    $workDir = $null
+    $sourceTarget = $null
+    $keepRecovery = $false
+    $canRestartPrevious = $false
+    try {
+        try { $locked = $mutex.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] { $locked = $true }
+        if (!$locked) { throw 'Другой установщик Layout Toolkit уже работает. Дождитесь его завершения.' }
+
+        $state = Read-InstallState
+        $legacyInstallPath = if ($null -eq $state) { Find-LegacyInstall } else { $null }
+        $detectedInstallPath = if ($state -and $state.PSObject.Properties['installPath']) { [string]$state.installPath } else { $legacyInstallPath }
+
+        if ($Uninstall) {
+            $target = Resolve-InstallPath $InstallPath $detectedInstallPath $true
+            Assert-SafeExistingInstall $target
+            Wait-PreviousInstance $target 0
+            if (Test-OwnedStartupShortcut $startupPath @($target)) { Remove-StartupShortcut }
+            if (Test-OwnedStartupShortcut $legacyStartupPath @($target)) { Remove-LegacyStartupShortcut }
+            if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+            if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
+            Write-Host 'Layout Toolkit удалён. Пользовательские файлы в Documents\Layout Toolkit сохранены.' -ForegroundColor Green
+            return
+        }
+
+        $sourceTarget = Resolve-InstallPath $InstallPath $detectedInstallPath ([bool]$Update)
+        if ([string]::IsNullOrWhiteSpace($sourceTarget)) {
+            Write-Host 'Установка отменена. Изменения не вносились.' -ForegroundColor Yellow
+            return
+        }
+        $target = if ($Update) { Get-CanonicalUpdatePath $sourceTarget } else { $sourceTarget }
+        if ($Update) { $sourceTarget = Resolve-UpdateSourcePath $sourceTarget $target }
+        Assert-SafeExistingInstall $sourceTarget
+        Assert-CanonicalUpdateDestination $sourceTarget $target
+        Wait-PreviousInstance $sourceTarget $WaitForPid
+        $canRestartPrevious = $WaitForPid -gt 0 -and (Test-InstallDirectory $sourceTarget)
+
+        $manifest = Invoke-RestMethod -Uri $manifestUrl
+        if ($manifest.schema_version -ne 1) { throw "Неподдерживаемая версия latest.json: $($manifest.schema_version)" }
+        $asset = $manifest.assets.windows
+        if (!$asset.url -or $asset.sha256 -notmatch '^[A-Fa-f0-9]{64}$' -or [int64]$asset.size -le 0) {
+            throw 'latest.json не содержит корректного описания Windows-архива.'
+        }
+        if ([uri]$asset.url -and ([uri]$asset.url).Scheme -ne 'https') { throw 'Архив релиза должен скачиваться по HTTPS.' }
+
+        $workDir = Join-Path ([IO.Path]::GetTempPath()) ('layout-toolkit-install-' + [guid]::NewGuid().ToString('N'))
+        $archivePath = Join-Path $workDir 'LayoutToolkit.zip'
+        $extractPath = Join-Path $workDir 'extracted'
+        New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
+        Write-Host "Скачивание Layout Toolkit $($manifest.version)..."
+        Invoke-WebRequest -Uri $asset.url -OutFile $archivePath -UseBasicParsing
+        $file = Get-Item -LiteralPath $archivePath
+        if ($file.Length -ne [int64]$asset.size) { throw "Размер архива не совпал: получено $($file.Length), ожидалось $($asset.size)." }
+        $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+        if ($actualHash -ne ([string]$asset.sha256).ToUpperInvariant()) { throw 'SHA-256 архива не совпал. Установка остановлена.' }
+
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+        $mainScripts = @(Get-ChildItem -LiteralPath $extractPath -Filter 'Layout_Toolkit_RU_EN.ahk' -File -Recurse)
+        if ($mainScripts.Count -ne 1) { throw 'В архиве должен быть ровно один Layout_Toolkit_RU_EN.ahk.' }
+        $payloadPath = $mainScripts[0].Directory.FullName
+        $links = @(Get-ChildItem -LiteralPath $extractPath -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+        if ($links.Count) { throw 'Архив содержит символические ссылки; установка остановлена.' }
+        Assert-ReleaseHealthProtocol $payloadPath
+        $runtime = Resolve-InstallRuntime $payloadPath $workDir
+        Write-Host 'Проверка новой версии...'
+        Invoke-ReleaseHealthCheck $runtime $payloadPath $workDir
+        # Recheck after downloading and dependency selection: an old copy may have been started meanwhile.
+        Wait-PreviousInstance $sourceTarget 0
+        $disableAutostart = [bool]$NoAutostart
+        if (!$NoAutostart -and $state -and $state.PSObject.Properties['autostart']) { $disableAutostart = !$state.autostart }
+        Invoke-InstallTransaction $payloadPath $sourceTarget $target $runtime $workDir $manifest $disableAutostart
+    } catch {
+        $failure = $_.Exception
+        $keepRecovery = $failure.Data.Contains('RollbackComplete') -and !$failure.Data['RollbackComplete']
+        if ($canRestartPrevious -and !$keepRecovery -and $sourceTarget -and (Test-InstallDirectory $sourceTarget)) {
+            try {
+                Wait-PreviousInstance $sourceTarget 0
+                Start-Process -FilePath (Join-Path $sourceTarget 'Run_Layout_Toolkit.cmd') -WorkingDirectory $sourceTarget -WindowStyle Hidden
+                Write-Warning 'Обновление не завершено. Предыдущая версия сохранена и запущена повторно.'
+            } catch { Write-Warning "Предыдущая версия сохранена, но её нужно запустить вручную: $sourceTarget" }
+        }
+        throw $failure
+    } finally {
+        if ($workDir -and !$keepRecovery -and (Test-Path -LiteralPath $workDir)) {
+            Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if ($locked) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+Invoke-InstallerMain
