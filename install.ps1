@@ -32,6 +32,15 @@ function Read-InstallState {
     catch { throw "Не удалось прочитать $statePath. Исправьте или удалите этот файл и повторите запуск." }
 }
 
+function Enter-InstallerWorkingDirectory {
+    # Set-Location alone does not release the native Windows current-directory
+    # handle inherited from an older UI or a terminal inside the installation.
+    $neutral = [Environment]::GetFolderPath('Windows')
+    if (!(Test-Path -LiteralPath $neutral -PathType Container)) { throw 'Windows directory is unavailable.' }
+    Set-Location -LiteralPath $neutral
+    [IO.Directory]::SetCurrentDirectory($neutral)
+}
+
 function Test-InstallDirectory([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
     return (Test-Path -LiteralPath (Join-Path $Path 'Layout_Toolkit_RU_EN.ahk') -PathType Leaf) -and
@@ -400,6 +409,9 @@ function Invoke-InstallTransaction([string]$PayloadPath, [string]$SourcePath, [s
 }
 
 function Invoke-InstallerMain {
+    $previousLocation = (Get-Location).Path
+    $previousNativeDirectory = [IO.Directory]::GetCurrentDirectory()
+    Enter-InstallerWorkingDirectory
     $mutexName = 'Local\LayoutToolkitInstaller-' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $mutex = New-Object Threading.Mutex($false, $mutexName)
     $locked = $false
@@ -476,6 +488,16 @@ function Invoke-InstallerMain {
         Invoke-InstallTransaction $payloadPath $sourceTarget $target $runtime $workDir $manifest $disableAutostart
     } catch {
         $failure = $_.Exception
+        # Preserve probe output before the temporary download directory is removed.
+        if ($workDir -and $script:InstallerLogDirectory -and (Test-Path -LiteralPath $workDir)) {
+            foreach ($name in @('health.stdout.txt','health.stderr.txt','startup.stdout.txt','startup.stderr.txt','startup-ready.json')) {
+                $diagnostic = Join-Path $workDir $name
+                if (Test-Path -LiteralPath $diagnostic -PathType Leaf) {
+                    try { Copy-Item -LiteralPath $diagnostic -Destination $script:InstallerLogDirectory -Force }
+                    catch { Write-Warning "Diagnostic copy failed: $diagnostic" }
+                }
+            }
+        }
         $keepRecovery = $failure.Data.Contains('RollbackComplete') -and !$failure.Data['RollbackComplete']
         if ($canRestartPrevious -and !$keepRecovery -and $sourceTarget -and (Test-InstallDirectory $sourceTarget)) {
             try {
@@ -491,7 +513,47 @@ function Invoke-InstallerMain {
         }
         if ($locked) { $mutex.ReleaseMutex() }
         $mutex.Dispose()
+        if (Test-Path -LiteralPath $previousLocation -PathType Container) { Set-Location -LiteralPath $previousLocation }
+        if (Test-Path -LiteralPath $previousNativeDirectory -PathType Container) { [IO.Directory]::SetCurrentDirectory($previousNativeDirectory) }
     }
 }
 
-Invoke-InstallerMain
+function Invoke-InstallerWithDiagnostics {
+    $script:InstallerLogDirectory = $null
+    $transcribing = $false
+    $previousLocation = (Get-Location).Path
+    $previousNativeDirectory = [IO.Directory]::GetCurrentDirectory()
+    try {
+        Enter-InstallerWorkingDirectory
+        $script:InstallerLogDirectory = Join-Path $stateDir ('Logs\install-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:InstallerLogDirectory -Force | Out-Null
+        Start-Transcript -LiteralPath (Join-Path $script:InstallerLogDirectory 'installer.log') -Force | Out-Null
+        $transcribing = $true
+        Invoke-InstallerMain
+    } catch {
+        $failure = $_
+        $errorLog = if ($script:InstallerLogDirectory) { Join-Path $script:InstallerLogDirectory 'error.txt' } else { '' }
+        if ($errorLog) {
+            try { [IO.File]::WriteAllText($errorLog, ($failure | Format-List * -Force | Out-String), [Text.UTF8Encoding]::new($true)) }
+            catch { Write-Warning 'Unable to save installer error log.' }
+        }
+        if ($WaitForPid -gt 0) {
+            try {
+                Add-Type -AssemblyName System.Windows.Forms
+                $null = [System.Windows.Forms.MessageBox]::Show(
+                    "Обновление не завершено.`n`n$($failure.Exception.Message)`n`nДиагностика: $errorLog",
+                    'Layout Toolkit — обновление', [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Error)
+            } catch { Write-Warning 'Unable to show installer error window.' }
+        }
+        throw $failure
+    } finally {
+        if ($transcribing) { Stop-Transcript | Out-Null }
+        # Do not re-enter a directory that no longer exists after migration.
+        if (Test-Path -LiteralPath $previousLocation -PathType Container) { Set-Location -LiteralPath $previousLocation }
+        if (Test-Path -LiteralPath $previousNativeDirectory -PathType Container) { [IO.Directory]::SetCurrentDirectory($previousNativeDirectory) }
+    }
+}
+
+$script:InstallerLogDirectory = $null
+Invoke-InstallerWithDiagnostics

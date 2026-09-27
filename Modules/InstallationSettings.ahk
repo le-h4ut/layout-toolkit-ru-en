@@ -207,6 +207,7 @@ LTInstall_StartUpdate(checkedVersion) {
     if MsgBox("Установить Layout Toolkit " checkedVersion "? Программа закроется на время обновления.", "Layout Toolkit", "YesNo Icon?") != "Yes"
         return false
     command := LTInstall_BuildUpdateCommand(status)
-    Run(command, A_ScriptDir)
+    ; Never hold the directory that the installer must rename for rollback.
+    Run(command, A_WinDir)
     ExitApp()
 }

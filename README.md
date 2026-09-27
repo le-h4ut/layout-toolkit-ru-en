@@ -70,6 +70,7 @@ Developer checks, with AutoHotkey v2 installed:
 .\Tests\Run-WebSettingsTests.ps1 -PrewarmTests
 .\Tests\Install.Tests.ps1
 .\Tests\Install.Transaction.Tests.ps1
+.\Tests\Install.Process.Tests.ps1
 .\Tests\HealthCheck.Tests.ps1
 .\Tests\Run-LiveInputLanguageTests.ps1
 .\Tests\Run-LiveInputLanguageTests.ps1 -RealInput
@@ -98,6 +99,20 @@ The installer asks where to place Layout Toolkit, verifies the release archive a
 starts the application. Running the same command again updates the detected
 installation. Installation information is stored in
 `%LocalAppData%\Layout Toolkit\install.json`.
+
+**Updating v1.5.0 or an earlier beta:** the old in-app updater starts its local
+installer from inside the installation directory, which can block backup moves.
+Close Toolkit and run the fresh installer once. For a manually extracted copy,
+pass its existing folder explicitly (replace the example path):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1))) -Update -InstallPath 'D:\Scripts\LT My' -NoAutostart
+```
+
+`-NoAutostart` keeps startup disabled; omit it if you want startup enabled.
+Existing managed preferences are retained. After v1.5.1 is installed, subsequent
+updates can use the Settings button. Installer logs are kept in
+`%LocalAppData%\Layout Toolkit\Logs`; UI failures show a persistent error dialog.
 
 ---
 

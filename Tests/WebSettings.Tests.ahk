@@ -171,11 +171,11 @@ WebTest_Run() {
         FileDelete(debugModePath)
         state := LTWebSettings.State()
         WebTest_Assert(state["projectUrl"] = SettingsGui_GetProjectUrl(), "web state uses the shared project URL")
-        WebTest_Assert(state["version"] = "v1.5.0", "stable release version is read from the changelog")
+        WebTest_Assert(state["version"] = "v1.5.1", "stable release version is read from the changelog")
         WebTest_Assert(!state["installation"]["managed"], "isolated fixture is not a managed installation")
         WebTest_Assert(state["installation"]["canUpdate"], "manual copy can update without install.json")
         WebTest_Assert(!LTInstall_CheckUpdate()["available"] && g_WebTestUpdateFetches = 1, "manual copy checks a manifest without using the network in tests")
-        g_WebTestUpdateVersion := "1.5.1"
+        g_WebTestUpdateVersion := "1.5.2"
         WebTest_Assert(LTInstall_CheckUpdate()["available"], "manual copy detects a newer stable update")
         command := LTInstall_BuildUpdateCommand(LTInstall_Status())
         WebTest_Assert(InStr(command, '-Update -InstallPath "' A_ScriptDir '" -WaitForPid ' ProcessExist()), "manual update targets the running copy and waits for its PID")
@@ -186,7 +186,7 @@ WebTest_Run() {
         fetches := g_WebTestUpdateFetches
         WebTest_Assert(!LTInstall_Status()["canUpdate"] && !LTInstall_CheckUpdate()["available"] && g_WebTestUpdateFetches = fetches, "Git copy is blocked before fetching updates")
         rejected := false
-        try LTInstall_StartUpdate("1.5.1")
+        try LTInstall_StartUpdate("1.5.2")
         catch
             rejected := true
         WebTest_Assert(rejected, "Git copy cannot start an update")
@@ -240,7 +240,7 @@ WebTest_Run() {
         DirCreate(A_ScriptDir "\InstallStateRoot\Layout Toolkit")
         FileAppend(JSON.stringify(Map("schemaVersion", 1, "installPath", A_ScriptDir, "installedVersion", "1.4.1", "autostart", JSON.false)), LTInstall_StatePath(), "UTF-8")
         WebTest_Assert(LTInstall_Status()["managed"], "matching install.json enables managed state")
-        WebTest_Assert(LTInstall_Status()["installedVersion"] = "v1.5.0", "update comparison uses actual files, not stale install state")
+        WebTest_Assert(LTInstall_Status()["installedVersion"] = "v1.5.1", "update comparison uses actual files, not stale install state")
         LTInstall_SaveAutostartState(true)
         WebTest_Assert(LTInstall_ReadState()["autostart"], "autostart preference is saved in install.json")
         LTInstall_SetAutostart(true, paths)
