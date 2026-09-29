@@ -37,6 +37,12 @@ try {
     Assert ((Find-LegacyInstall) -eq $legacyInstall) 'legacy shortcut resolves the script path from arguments'
     Assert ((Resolve-InstallPath '' $legacyInstall $true) -eq $legacyInstall) 'detected update path bypasses folder picker'
     Assert ((Resolve-InstallPath $legacyInstall '' $false) -eq $legacyInstall) 'explicit path bypasses folder picker'
+    $driveRoot = [IO.Path]::GetPathRoot($testRoot)
+    Ensure-InstallParent (Join-Path $driveRoot 'Layout Toolkit')
+    Assert (Test-Path -LiteralPath $driveRoot -PathType Container) 'existing drive root is accepted as install parent'
+    $nestedParent = Join-Path $testRoot 'New Parent'
+    Ensure-InstallParent (Join-Path $nestedParent 'Layout Toolkit')
+    Assert (Test-Path -LiteralPath $nestedParent -PathType Container) 'missing install parent is created'
     $misspelledInstall = Join-Path $testRoot 'Layout Toolkir Ru En'
     $canonicalInstall = Join-Path $testRoot 'Layout Toolkit Ru En'
     Assert ((Get-CanonicalUpdatePath $misspelledInstall) -eq $canonicalInstall) '1.4.1 and beta.1 folder typo is corrected during update'

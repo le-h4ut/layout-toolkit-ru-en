@@ -95,10 +95,21 @@ Open PowerShell and paste this command:
 (irm https://raw.githubusercontent.com/le-h4ut/layout-toolkit-ru-en/main/install.ps1).TrimStart([char]0xFEFF) | iex
 ```
 
-The installer asks where to place Layout Toolkit, verifies the release archive and
-starts the application. Running the same command again updates the detected
-installation. Installation information is stored in
-`%LocalAppData%\Layout Toolkit\install.json`.
+This is the same command for a new installation and an update. It automatically
+updates a copy recorded in `%LocalAppData%\Layout Toolkit\install.json` or found
+through the old `Layout Toolkit RU-EN.lnk` startup shortcut. Otherwise it opens
+the folder picker. For a new install, select a parent directory (including a
+drive root such as `D:\`) and choose whether to create `Layout Toolkit` inside it.
+
+An unregistered, manually extracted copy in an arbitrary folder cannot be found
+reliably without scanning the disk. To update it with the same command, select
+the **existing application folder itself** in the picker; if asked about a new
+subfolder, choose **No**. The installer validates that it contains the Toolkit
+script and launcher, then replaces that application directory and registers it
+in `install.json`. Do not select a folder containing unrelated personal files.
+Alternatively, pass `-Update -InstallPath` explicitly as shown below for
+non-interactive use. If `-Update` is given without a registered/legacy path or
+`-InstallPath`, the installer stops with an explanation instead of scanning drives.
 
 **Updating v1.5.0 or an earlier beta:** the old in-app updater starts its local
 installer from inside the installation directory, which can block backup moves.
@@ -110,7 +121,7 @@ pass its existing folder explicitly (replace the example path):
 ```
 
 `-NoAutostart` keeps startup disabled; omit it if you want startup enabled.
-Existing managed preferences are retained. After v1.5.1 is installed, subsequent
+Existing managed preferences are retained. After v1.5.2 is installed, subsequent
 updates can use the Settings button. Installer logs are kept in
 `%LocalAppData%\Layout Toolkit\Logs`; UI failures show a persistent error dialog.
 

@@ -77,7 +77,8 @@ function Select-InteractiveInstallPath {
     $shell = New-Object -ComObject Shell.Application
     $folder = $shell.BrowseForFolder(0, 'Выберите папку для установки Layout Toolkit', 0x41)
     if ($null -eq $folder -or $null -eq $folder.Self -or [string]::IsNullOrWhiteSpace($folder.Self.Path)) { return $null }
-    $selected = [IO.Path]::GetFullPath([string]$folder.Self.Path).TrimEnd('\')
+    $selected = [IO.Path]::GetFullPath([string]$folder.Self.Path)
+    if ($selected -ne [IO.Path]::GetPathRoot($selected)) { $selected = $selected.TrimEnd('\') }
     if ([IO.Path]::GetFileName($selected) -ieq 'Layout Toolkit') { return $selected }
 
     Add-Type -AssemblyName PresentationFramework
@@ -153,6 +154,14 @@ function Assert-SafeExistingInstall([string]$TargetPath) {
     if (!(Test-Path -LiteralPath (Join-Path $TargetPath 'Layout_Toolkit_RU_EN.ahk') -PathType Leaf) -or
         !(Test-Path -LiteralPath (Join-Path $TargetPath 'Run_Layout_Toolkit.cmd') -PathType Leaf)) {
         throw "Папка $TargetPath не похожа на установленный Layout Toolkit. Выберите пустую папку."
+    }
+}
+
+function Ensure-InstallParent([string]$TargetPath) {
+    $parent = Split-Path -Parent $TargetPath
+    # Windows PowerShell 5.1 New-Item -Force fails for an existing drive root (for example D:\).
+    if (!(Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 }
 
@@ -351,7 +360,7 @@ function Invoke-InstallTransaction([string]$PayloadPath, [string]$SourcePath, [s
     $rollbackIncomplete = $false
     $started = $null
     try {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $TargetPath) -Force | Out-Null
+        Ensure-InstallParent $TargetPath
         New-Item -ItemType Directory -Path $stagePath | Out-Null
         $stageOwned = $true
         foreach ($entry in Get-ChildItem -LiteralPath $PayloadPath -Force) {
@@ -393,7 +402,7 @@ function Invoke-InstallTransaction([string]$PayloadPath, [string]$SourcePath, [s
             $recovery.Data['RollbackComplete'] = $false
             throw $recovery
         }
-        throw $failure
+        throw
     } finally {
         if ($stageOwned -and !$rollbackIncomplete -and (Test-Path -LiteralPath $stagePath)) {
             try { Remove-Item -LiteralPath $stagePath -Recurse -Force }
@@ -506,7 +515,7 @@ function Invoke-InstallerMain {
                 Write-Warning 'Обновление не завершено. Предыдущая версия сохранена и запущена повторно.'
             } catch { Write-Warning "Предыдущая версия сохранена, но её нужно запустить вручную: $sourceTarget" }
         }
-        throw $failure
+        throw
     } finally {
         if ($workDir -and !$keepRecovery -and (Test-Path -LiteralPath $workDir)) {
             Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -546,7 +555,7 @@ function Invoke-InstallerWithDiagnostics {
                     [System.Windows.Forms.MessageBoxIcon]::Error)
             } catch { Write-Warning 'Unable to show installer error window.' }
         }
-        throw $failure
+        throw
     } finally {
         if ($transcribing) { Stop-Transcript | Out-Null }
         # Do not re-enter a directory that no longer exists after migration.
